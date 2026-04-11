@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-“””
+"""
 بوت نبّهني — تتبع أسعار المنتجات
 Nabehni Bot — Product Price Tracker
-“””
+"""
 
 import os
 import json
@@ -15,65 +15,65 @@ from typing import Optional, Dict, Any
 
 # ─── إعدادات ─────────────────────────────────────────────
 
-BOT_TOKEN = os.getenv(“BOT_TOKEN”, “”)
-ADMIN_ID = int(os.getenv(“ADMIN_ID”, “”))
-SALLA_STORE_URL = os.getenv(“SALLA_STORE_URL”, “https://your-store.salla.sa”)
-SALLA_BASIC_URL = os.getenv(“SALLA_BASIC_URL”, f”{SALLA_STORE_URL}/product/basic”)
-SALLA_PRO_URL = os.getenv(“SALLA_PRO_URL”, f”{SALLA_STORE_URL}/product/pro”)
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+SALLA_STORE_URL = os.getenv("SALLA_STORE_URL", "https://your-store.salla.sa")
+SALLA_BASIC_URL = os.getenv("SALLA_BASIC_URL", f"{SALLA_STORE_URL}/product/basic")
+SALLA_PRO_URL = os.getenv("SALLA_PRO_URL", f"{SALLA_STORE_URL}/product/pro")
 
-DB_PATH = “nabehni.db”
-SCRAPER_API_KEY = “”
-IPROYAL_PROXY = “”
+DB_PATH = "nabehni.db"
+SCRAPER_API_KEY = os.getenv("SCRAPER_API_KEY", "")
+IPROYAL_PROXY = os.getenv("IPROYAL_PROXY", "")
 
 # ─── الباقات ──────────────────────────────────────────────
 
 PLANS = {
-“free”: {
-“name”: “🆓 المجانية”,
-“name_short”: “المجانية”,
-“max_products”: 1,
-“duration_days”: 90,
-“price”: 0,
-“description”: (
-“📦 *الباقة المجانية*\n\n”
-“• تتبّع منتج واحد\n”
-“• مدة ٣ أشهر\n”
-“• تنبيه فوري عند نزول السعر\n\n”
-“✅ مثالية لتجربة الخدمة!”
+"free": {
+"name": "🆓 المجانية",
+"name_short": "المجانية",
+"max_products": 1,
+"duration_days": 90,
+"price": 0,
+"description": (
+"📦 *الباقة المجانية*\n\n"
+"• تتبّع منتج واحد\n"
+"• مدة ٣ أشهر\n"
+"• تنبيه فوري عند نزول السعر\n\n"
+"✅ مثالية لتجربة الخدمة!"
 ),
 },
-“basic”: {
-“name”: “⭐ الأساسية — 9 ر.س”,
-“name_short”: “الأساسية”,
-“max_products”: 3,
-“duration_days”: 90,
-“price”: 9,
-“description”: (
-“⭐ *الباقة الأساسية — 9 ر.س*\n\n”
-“• تتبّع حتى ٣ منتجات\n”
-“• مدة ٣ أشهر\n”
-“• تنبيه فوري عند نزول السعر\n”
-“• عرض تاريخ آخر نزول للسعر\n\n”
-“💡 الأنسب للمتسوّق الذكي!”
+"basic": {
+"name": "⭐ الأساسية — 9 ر.س",
+"name_short": "الأساسية",
+"max_products": 3,
+"duration_days": 90,
+"price": 9,
+"description": (
+"⭐ *الباقة الأساسية — 9 ر.س*\n\n"
+"• تتبّع حتى ٣ منتجات\n"
+"• مدة ٣ أشهر\n"
+"• تنبيه فوري عند نزول السعر\n"
+"• عرض تاريخ آخر نزول للسعر\n\n"
+"💡 الأنسب للمتسوّق الذكي!"
 ),
-“salla_url”: SALLA_BASIC_URL,
+"salla_url": SALLA_BASIC_URL,
 },
-“pro”: {
-“name”: “💎 برو — 29 ر.س”,
-“name_short”: “برو”,
-“max_products”: 10,
-“duration_days”: 90,
-“price”: 29,
-“description”: (
-“💎 *باقة برو — 29 ر.س*\n\n”
-“• تتبّع حتى ١٠ منتجات\n”
-“• مدة ٣ أشهر\n”
-“• تنبيه فوري عند نزول السعر\n”
-“• عرض تاريخ آخر نزول للسعر\n”
-“• أولوية في الدعم\n\n”
-“🔥 للمتسوّق المحترف!”
+"pro": {
+"name": "💎 برو — 29 ر.س",
+"name_short": "برو",
+"max_products": 10,
+"duration_days": 90,
+"price": 29,
+"description": (
+"💎 *باقة برو — 29 ر.س*\n\n"
+"• تتبّع حتى ١٠ منتجات\n"
+"• مدة ٣ أشهر\n"
+"• تنبيه فوري عند نزول السعر\n"
+"• عرض تاريخ آخر نزول للسعر\n"
+"• أولوية في الدعم\n\n"
+"🔥 للمتسوّق المحترف!"
 ),
-“salla_url”: SALLA_PRO_URL,
+"salla_url": SALLA_PRO_URL,
 },
 }
 
@@ -84,291 +84,281 @@ PLANS = {
 # ═══════════════════════════════════════════════════════════
 
 def init_db():
-“”“إنشاء قاعدة البيانات والجداول”””
-conn = sqlite3.connect(DB_PATH)
-conn.row_factory = sqlite3.Row
-c = conn.cursor()
+    """إنشاء قاعدة البيانات والجداول"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
 
-```
-c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        username TEXT,
-        first_name TEXT,
-        plan TEXT DEFAULT NULL,
-        plan_name TEXT DEFAULT NULL,
-        max_products INTEGER DEFAULT 0,
-        activated_at TEXT DEFAULT NULL,
-        expires_at TEXT DEFAULT NULL,
-        used_free_trial INTEGER DEFAULT 0,
-        joined_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-""")
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            plan TEXT DEFAULT NULL,
+            plan_name TEXT DEFAULT NULL,
+            max_products INTEGER DEFAULT 0,
+            activated_at TEXT DEFAULT NULL,
+            expires_at TEXT DEFAULT NULL,
+            used_free_trial INTEGER DEFAULT 0,
+            joined_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
-c.execute("""
-    CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        url TEXT,
-        title TEXT,
-        store TEXT,
-        initial_price REAL,
-        current_price REAL,
-        lowest_price REAL,
-        target_price REAL DEFAULT NULL,
-        currency TEXT DEFAULT 'ر.س',
-        fetch_method TEXT DEFAULT 'free',
-        added_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        last_checked TEXT DEFAULT NULL,
-        FOREIGN KEY (user_id) REFERENCES users(user_id)
-    )
-""")
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            url TEXT,
+            title TEXT,
+            store TEXT,
+            initial_price REAL,
+            current_price REAL,
+            lowest_price REAL,
+            target_price REAL DEFAULT NULL,
+            currency TEXT DEFAULT 'ر.س',
+            fetch_method TEXT DEFAULT 'free',
+            added_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            last_checked TEXT DEFAULT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    """)
 
-# إضافة العمود للجداول القديمة
-try:
-    c.execute("ALTER TABLE products ADD COLUMN fetch_method TEXT DEFAULT 'free'")
-except Exception:
-    pass  # العمود موجود مسبقاً
+    # إضافة العمود للجداول القديمة
+    try:
+        c.execute("ALTER TABLE products ADD COLUMN fetch_method TEXT DEFAULT 'free'")
+    except Exception:
+        pass  # العمود موجود مسبقاً
 
-c.execute("""
-    CREATE TABLE IF NOT EXISTS price_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_id INTEGER,
-        price REAL,
-        recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (product_id) REFERENCES products(id)
-    )
-""")
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS price_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER,
+            price REAL,
+            recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (product_id) REFERENCES products(id)
+        )
+    """)
 
-c.execute("""
-    CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        plan_key TEXT,
-        order_number TEXT,
-        status TEXT DEFAULT 'pending',
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(user_id)
-    )
-""")
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            plan_key TEXT,
+            order_number TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    """)
 
-c.execute("""
-    CREATE TABLE IF NOT EXISTS reports (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        message TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(user_id)
-    )
-""")
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            message TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    """)
 
-conn.commit()
-conn.close()
-```
+    conn.commit()
+    conn.close()
 
 def get_db():
-conn = sqlite3.connect(DB_PATH)
-conn.row_factory = sqlite3.Row
-return conn
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def get_user(user_id: int) -> Optional[dict]:
-conn = get_db()
-row = conn.execute(“SELECT * FROM users WHERE user_id = ?”, (user_id,)).fetchone()
-conn.close()
-return dict(row) if row else None
+    conn = get_db()
+    row = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
-def ensure_user(user_id: int, first_name: str = “”, username: str = “”):
-conn = get_db()
-conn.execute(”””
-INSERT OR IGNORE INTO users (user_id, first_name, username)
-VALUES (?, ?, ?)
-“””, (user_id, first_name, username))
-# تحديث الاسم
-conn.execute(”””
-UPDATE users SET first_name = ?, username = ? WHERE user_id = ?
-“””, (first_name, username, user_id))
-conn.commit()
-conn.close()
+def ensure_user(user_id: int, first_name: str = "", username: str = ""):
+    conn = get_db()
+    conn.execute("""
+    INSERT OR IGNORE INTO users (user_id, first_name, username)
+    VALUES (?, ?, ?)
+    """, (user_id, first_name, username))
+    # تحديث الاسم
+    conn.execute("""
+    UPDATE users SET first_name = ?, username = ? WHERE user_id = ?
+    """, (first_name, username, user_id))
+    conn.commit()
+    conn.close()
 
 def activate_plan(user_id: int, plan_key: str) -> str:
-plan = PLANS[plan_key]
-now = datetime.now()
-expiry = now + timedelta(days=plan[“duration_days”])
+    plan = PLANS[plan_key]
+    now = datetime.now()
+    expiry = now + timedelta(days=plan["duration_days"])
 
-```
-conn = get_db()
-updates = {
-    "plan": plan_key,
-    "plan_name": plan["name_short"],
-    "max_products": plan["max_products"],
-    "activated_at": now.isoformat(),
-    "expires_at": expiry.isoformat(),
-}
-if plan_key == "free":
-    updates["used_free_trial"] = 1
+    conn = get_db()
+    updates = {
+        "plan": plan_key,
+        "plan_name": plan["name_short"],
+        "max_products": plan["max_products"],
+        "activated_at": now.isoformat(),
+        "expires_at": expiry.isoformat(),
+    }
+    if plan_key == "free":
+        updates["used_free_trial"] = 1
 
-set_clause = ", ".join(f"{k} = ?" for k in updates)
-values = list(updates.values()) + [user_id]
-conn.execute(f"UPDATE users SET {set_clause} WHERE user_id = ?", values)
-conn.commit()
-conn.close()
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    values = list(updates.values()) + [user_id]
+    conn.execute(f"UPDATE users SET {set_clause} WHERE user_id = ?", values)
+    conn.commit()
+    conn.close()
 
-return (
-    f"✅ تم تفعيل {plan['name']} بنجاح!\n\n"
-    f"📦 عدد المنتجات: {plan['max_products']}\n"
-    f"📅 تنتهي في: {expiry.strftime('%Y/%m/%d')}\n\n"
-    f"الحين أرسل رابط المنتج اللي تبغى تتبّع سعره 🔗"
-)
-```
+    return (
+        f"✅ تم تفعيل {plan['name']} بنجاح!\n\n"
+        f"📦 عدد المنتجات: {plan['max_products']}\n"
+        f"📅 تنتهي في: {expiry.strftime('%Y/%m/%d')}\n\n"
+        f"الحين أرسل رابط المنتج اللي تبغى تتبّع سعره 🔗"
+    )
 
 def get_user_products(user_id: int) -> list:
-conn = get_db()
-rows = conn.execute(
-“SELECT * FROM products WHERE user_id = ? ORDER BY added_at DESC”, (user_id,)
-).fetchall()
-conn.close()
-return [dict(r) for r in rows]
+    conn = get_db()
+    rows = conn.execute(
+    "SELECT * FROM products WHERE user_id = ? ORDER BY added_at DESC", (user_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 def add_product(user_id: int, url: str, product_info: dict, target_price=None) -> Optional[int]:
-conn = get_db()
-c = conn.cursor()
-fetch_method = “scraperapi” if product_info.get(”_used_scraperapi”) else “free”
-c.execute(”””
-INSERT INTO products (user_id, url, title, store, initial_price, current_price, lowest_price, target_price, currency, fetch_method, last_checked)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-“””, (
-user_id, url, product_info[“title”], product_info[“store”],
-product_info[“price”], product_info[“price”], product_info[“price”],
-target_price, product_info.get(“currency”, “ر.س”),
-fetch_method,
-datetime.now().isoformat(),
-))
-product_id = c.lastrowid
+    conn = get_db()
+    c = conn.cursor()
+    fetch_method = "scraperapi" if product_info.get("_used_scraperapi") else "free"
+    c.execute("""
+    INSERT INTO products (user_id, url, title, store, initial_price, current_price, lowest_price, target_price, currency, fetch_method, last_checked)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+    user_id, url, product_info["title"], product_info["store"],
+    product_info["price"], product_info["price"], product_info["price"],
+    target_price, product_info.get("currency", "ر.س"),
+    fetch_method,
+    datetime.now().isoformat(),
+    ))
+    product_id = c.lastrowid
 
-```
-c.execute("""
-    INSERT INTO price_history (product_id, price) VALUES (?, ?)
-""", (product_id, product_info["price"]))
+    c.execute("""
+        INSERT INTO price_history (product_id, price) VALUES (?, ?)
+    """, (product_id, product_info["price"]))
 
-conn.commit()
-conn.close()
-return product_id
-```
+    conn.commit()
+    conn.close()
+    return product_id
 
 def delete_product(product_id: int):
-conn = get_db()
-conn.execute(“DELETE FROM price_history WHERE product_id = ?”, (product_id,))
-conn.execute(“DELETE FROM products WHERE id = ?”, (product_id,))
-conn.commit()
-conn.close()
+    conn = get_db()
+    conn.execute("DELETE FROM price_history WHERE product_id = ?", (product_id,))
+    conn.execute("DELETE FROM products WHERE id = ?", (product_id,))
+    conn.commit()
+    conn.close()
 
 def save_order(user_id: int, plan_key: str, order_number: str):
-conn = get_db()
-conn.execute(”””
-INSERT INTO orders (user_id, plan_key, order_number)
-VALUES (?, ?, ?)
-“””, (user_id, plan_key, order_number))
-conn.commit()
-conn.close()
+    conn = get_db()
+    conn.execute("""
+    INSERT INTO orders (user_id, plan_key, order_number)
+    VALUES (?, ?, ?)
+    """, (user_id, plan_key, order_number))
+    conn.commit()
+    conn.close()
 
 def save_report(user_id: int, message: str):
-conn = get_db()
-conn.execute(”””
-INSERT INTO reports (user_id, message) VALUES (?, ?)
-“””, (user_id, message))
-conn.commit()
-conn.close()
+    conn = get_db()
+    conn.execute("""
+    INSERT INTO reports (user_id, message) VALUES (?, ?)
+    """, (user_id, message))
+    conn.commit()
+    conn.close()
 
 def get_admin_stats() -> str:
-conn = get_db()
-now = datetime.now().isoformat()
+    conn = get_db()
+    now = datetime.now().isoformat()
 
-```
-total_users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-active_free = conn.execute(
-    "SELECT COUNT(*) FROM users WHERE plan = 'free' AND expires_at > ?", (now,)
-).fetchone()[0]
-active_basic = conn.execute(
-    "SELECT COUNT(*) FROM users WHERE plan = 'basic' AND expires_at > ?", (now,)
-).fetchone()[0]
-active_pro = conn.execute(
-    "SELECT COUNT(*) FROM users WHERE plan = 'pro' AND expires_at > ?", (now,)
-).fetchone()[0]
+    total_users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    active_free = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE plan = 'free' AND expires_at > ?", (now,)
+    ).fetchone()[0]
+    active_basic = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE plan = 'basic' AND expires_at > ?", (now,)
+    ).fetchone()[0]
+    active_pro = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE plan = 'pro' AND expires_at > ?", (now,)
+    ).fetchone()[0]
 
-total_products = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
-pending_orders = conn.execute(
-    "SELECT COUNT(*) FROM orders WHERE status = 'pending'"
-).fetchone()[0]
+    total_products = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
+    pending_orders = conn.execute(
+        "SELECT COUNT(*) FROM orders WHERE status = 'pending'"
+    ).fetchone()[0]
 
-# كم واحد جرّب المجانية ثم اشترك مدفوع
-free_then_paid = conn.execute("""
-    SELECT COUNT(*) FROM users
-    WHERE used_free_trial = 1 AND plan IN ('basic', 'pro')
-""").fetchone()[0]
+    # كم واحد جرّب المجانية ثم اشترك مدفوع
+    free_then_paid = conn.execute("""
+        SELECT COUNT(*) FROM users
+        WHERE used_free_trial = 1 AND plan IN ('basic', 'pro')
+    """).fetchone()[0]
 
-total_free_tried = conn.execute(
-    "SELECT COUNT(*) FROM users WHERE used_free_trial = 1"
-).fetchone()[0]
+    total_free_tried = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE used_free_trial = 1"
+    ).fetchone()[0]
 
-total_reports = conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0]
+    total_reports = conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0]
 
-conn.close()
+    conn.close()
 
-active_total = active_free + active_basic + active_pro
-conversion = f"{(free_then_paid/total_free_tried*100):.0f}%" if total_free_tried > 0 else "0%"
+    active_total = active_free + active_basic + active_pro
+    conversion = f"{(free_then_paid/total_free_tried*100):.0f}%" if total_free_tried > 0 else "0%"
 
-return (
-    f"📊 *إحصائيات نبّهني*\n\n"
-    f"👥 إجمالي المستخدمين: {total_users}\n"
-    f"✅ المشتركين الفعّالين: {active_total}\n"
-    f"   ├ 🆓 مجانية: {active_free}\n"
-    f"   ├ ⭐ أساسية: {active_basic}\n"
-    f"   └ 💎 برو: {active_pro}\n\n"
-    f"📦 المنتجات المتتبعة: {total_products}\n"
-    f"⏳ طلبات معلّقة: {pending_orders}\n"
-    f"📬 البلاغات: {total_reports}\n\n"
-    f"📈 *معدل التحويل:*\n"
-    f"جرّبوا المجانية: {total_free_tried}\n"
-    f"اشتركوا مدفوع: {free_then_paid}\n"
-    f"النسبة: {conversion}"
-)
-```
+    return (
+        f"📊 *إحصائيات نبّهني*\n\n"
+        f"👥 إجمالي المستخدمين: {total_users}\n"
+        f"✅ المشتركين الفعّالين: {active_total}\n"
+        f"   ├ 🆓 مجانية: {active_free}\n"
+        f"   ├ ⭐ أساسية: {active_basic}\n"
+        f"   └ 💎 برو: {active_pro}\n\n"
+        f"📦 المنتجات المتتبعة: {total_products}\n"
+        f"⏳ طلبات معلّقة: {pending_orders}\n"
+        f"📬 البلاغات: {total_reports}\n\n"
+        f"📈 *معدل التحويل:*\n"
+        f"جرّبوا المجانية: {total_free_tried}\n"
+        f"اشتركوا مدفوع: {free_then_paid}\n"
+        f"النسبة: {conversion}"
+    )
 
 def get_admin_users_detail() -> str:
-“”“تفاصيل المستخدمين للأدمن”””
-conn = get_db()
-rows = conn.execute(”””
-SELECT u.*, COUNT(p.id) as product_count
-FROM users u
-LEFT JOIN products p ON u.user_id = p.user_id
-GROUP BY u.user_id
-ORDER BY u.joined_at DESC
-LIMIT 50
-“””).fetchall()
-conn.close()
+    """تفاصيل المستخدمين للأدمن"""
+    conn = get_db()
+    rows = conn.execute("""
+    SELECT u.*, COUNT(p.id) as product_count
+    FROM users u
+    LEFT JOIN products p ON u.user_id = p.user_id
+    GROUP BY u.user_id
+    ORDER BY u.joined_at DESC
+    LIMIT 50
+    """).fetchall()
+    conn.close()
 
-```
-if not rows:
-    return "📭 لا يوجد مستخدمين."
+    if not rows:
+        return "📭 لا يوجد مستخدمين."
 
-text = "👥 *آخر ٥٠ مستخدم:*\n\n"
-for r in rows:
-    r = dict(r)
-    plan_icon = {"free": "🆓", "basic": "⭐", "pro": "💎"}.get(r["plan"] or "", "❌")
-    name = r.get("first_name") or r.get("username") or "بدون اسم"
-    text += (
-        f"{plan_icon} *{name}* (`{r['user_id']}`)\n"
-        f"   الباقة: {r.get('plan_name') or 'بدون'} | "
-        f"المنتجات: {r['product_count']}\n"
-    )
-    if r.get("expires_at"):
-        exp = datetime.fromisoformat(r["expires_at"])
-        remaining = max(0, (exp - datetime.now()).days)
-        text += f"   متبقي: {remaining} يوم\n"
-    text += "\n"
+    text = "👥 *آخر ٥٠ مستخدم:*\n\n"
+    for r in rows:
+        r = dict(r)
+        plan_icon = {"free": "🆓", "basic": "⭐", "pro": "💎"}.get(r["plan"] or "", "❌")
+        name = r.get("first_name") or r.get("username") or "بدون اسم"
+        text += (
+            f"{plan_icon} *{name}* (`{r['user_id']}`)\n"
+            f"   الباقة: {r.get('plan_name') or 'بدون'} | "
+            f"المنتجات: {r['product_count']}\n"
+        )
+        if r.get("expires_at"):
+            exp = datetime.fromisoformat(r["expires_at"])
+            remaining = max(0, (exp - datetime.now()).days)
+            text += f"   متبقي: {remaining} يوم\n"
+        text += "\n"
 
-return text
-```
+    return text
 
 # ═══════════════════════════════════════════════════════════
 
@@ -377,884 +367,868 @@ return text
 # ═══════════════════════════════════════════════════════════
 
 def detect_store_name(url: str) -> str:
-“”“استخراج اسم المتجر من الرابط”””
-try:
-from urllib.parse import urlparse
-domain = urlparse(url).netloc.lower()
-domain = domain.replace(“www.”, “”).replace(“www2.”, “”)
+    """استخراج اسم المتجر من الرابط"""
+    try:
+        from urllib.parse import urlparse
+        domain = urlparse(url).netloc.lower()
+        domain = domain.replace("www.", "").replace("www2.", "")
 
-```
-    # أسماء معروفة
-    store_names = {
-        "amazon.sa": "أمازون",
-        "amazon.ae": "أمازون",
-        "amazon.com": "أمازون",
-        "noon.com": "نون",
-        "jarir.com": "جرير",
-        "extra.com": "اكسترا",
-        "almunayes.com": "المنيع",
-        "ikea.sa": "إيكيا",
-        "ikea.com": "إيكيا",
-        "ikea.com.sa": "إيكيا",
-        "zara.com": "زارا",
-        "hm.com": "اتش اند ام",
-        "shein.com": "شي إن",
-        "ar.shein.com": "شي إن",
-        "aliexpress.com": "علي إكسبرس",
-        "ar.aliexpress.com": "علي إكسبرس",
-        "namshi.com": "نمشي",
-        "sephora.sa": "سيفورا",
-        "niceonesa.com": "نايس ون",
-        "stc.com.sa": "STC",
-    }
+        # أسماء معروفة
+        store_names = {
+            "amazon.sa": "أمازون",
+            "amazon.ae": "أمازون",
+            "amazon.com": "أمازون",
+            "noon.com": "نون",
+            "jarir.com": "جرير",
+            "extra.com": "اكسترا",
+            "almunayes.com": "المنيع",
+            "ikea.sa": "إيكيا",
+            "ikea.com": "إيكيا",
+            "ikea.com.sa": "إيكيا",
+            "zara.com": "زارا",
+            "hm.com": "اتش اند ام",
+            "shein.com": "شي إن",
+            "ar.shein.com": "شي إن",
+            "aliexpress.com": "علي إكسبرس",
+            "ar.aliexpress.com": "علي إكسبرس",
+            "namshi.com": "نمشي",
+            "sephora.sa": "سيفورا",
+            "niceonesa.com": "نايس ون",
+            "stc.com.sa": "STC",
+        }
 
-    for key, name in store_names.items():
-        if key in domain:
-            return name
+        for key, name in store_names.items():
+            if key in domain:
+                return name
 
-    # اسم عام من الدومين
-    parts = domain.split(".")
-    return parts[0].capitalize()
+        # اسم عام من الدومين
+        parts = domain.split(".")
+        return parts[0].capitalize()
 
-except Exception:
-    return "متجر"
-```
+    except Exception:
+        return "متجر"
 
 def clean_tracking_url(url: str) -> str:
-# نون: نبقي بس الرابط بدون أي parameters
-if “noon.com” in url:
-return url.split(”?”)[0]
-# شي إن: نبقي main_attr فقط
-if “shein.com” in url and “sharejump” not in url:
-import re as r2
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-parsed = urlparse(url)
-params = parse_qs(parsed.query)
-keep = {k: v for k, v in params.items() if k in (“main_attr”, “mallCode”)}
-return urlunparse(parsed._replace(query=urlencode(keep, doseq=True)))
-“”“تنظيف الرابط من tracking parameters”””
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+    # نون: نبقي بس الرابط بدون أي parameters
+    if "noon.com" in url:
+        return url.split("?")[0]
+    # شي إن: نبقي main_attr فقط
+    if "shein.com" in url and "sharejump" not in url:
+        import re as r2
+        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        keep = {k: v for k, v in params.items() if k in ("main_attr", "mallCode")}
+        return urlunparse(parsed._replace(query=urlencode(keep, doseq=True)))
+    """تنظيف الرابط من tracking parameters"""
+    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
-```
-try:
-    parsed = urlparse(url)
-    params = parse_qs(parsed.query)
+    try:
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
 
-    # tracking params الشائعة اللي نحذفها
-    tracking_keys = {
-        "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
-        "gclid", "fbclid", "mc_cid", "mc_eid", "ref", "ref_",
-        "shareId", "share", "srsltid", "social_share", "o", "gad_source", "gad_campaignid", "gbraid", "ref_",
-    }
+        # tracking params الشائعة اللي نحذفها
+        tracking_keys = {
+            "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+            "gclid", "fbclid", "mc_cid", "mc_eid", "ref", "ref_",
+            "shareId", "share", "srsltid", "social_share", "o", "gad_source", "gad_campaignid", "gbraid", "ref_",
+        }
 
-    cleaned = {k: v for k, v in params.items() if k.lower() not in tracking_keys}
-    new_query = urlencode(cleaned, doseq=True)
-    clean = urlunparse(parsed._replace(query=new_query))
-    return clean
-except Exception:
-    return url
-```
+        cleaned = {k: v for k, v in params.items() if k.lower() not in tracking_keys}
+        new_query = urlencode(cleaned, doseq=True)
+        clean = urlunparse(parsed._replace(query=new_query))
+        return clean
+    except Exception:
+        return url
 
 async def fetch_price_noon_api(url: str) -> Optional[dict]:
-“”“جلب السعر من نون عبر API الداخلي”””
-import aiohttp
+    """جلب السعر من نون عبر API الداخلي"""
+    import aiohttp
 
-```
-# تنظيف الرابط من tracking parameters
-clean_url = re.split(r'[?#]', url)[0]
+    # تنظيف الرابط من tracking parameters
+    clean_url = re.split(r'[?#]', url)[0]
 
-# استخراج SKU من الرابط
-# نون يستخدم أنماط مختلفة:
-# /NXXXXXX/p/ أو /Z1ED.../p/ أو /FN.../p/
-match = re.search(r"/([A-Z0-9]{6,})/p/?$", clean_url, re.IGNORECASE)
-if not match:
-    # محاولة من o= parameter
-    match = re.search(r"[?&]o=([a-z0-9-]+)", url, re.IGNORECASE)
-    if match:
-        # o=z1ed966d5c4cac9907396z-5 → نأخذ الجزء الأول
-        sku = match.group(1).split("-")[0].upper()
+    # استخراج SKU من الرابط
+    # نون يستخدم أنماط مختلفة:
+    # /NXXXXXX/p/ أو /Z1ED.../p/ أو /FN.../p/
+    match = re.search(r"/([A-Z0-9]{6,})/p/?$", clean_url, re.IGNORECASE)
+    if not match:
+        # محاولة من o= parameter
+        match = re.search(r"[?&]o=([a-z0-9-]+)", url, re.IGNORECASE)
+        if match:
+            # o=z1ed966d5c4cac9907396z-5 → نأخذ الجزء الأول
+            sku = match.group(1).split("-")[0].upper()
+        else:
+            return None
     else:
+        sku = match.group(1).upper()
+    if sku.startswith("Z"):
         return None
-else:
-    sku = match.group(1).upper()
-if sku.startswith("Z"):
-    return None
 
-# نون API
-api_url = f"https://www.noon.com/_svc/catalog/api/v3/u/{sku}?locale=ar-sa"
+    # نون API
+    api_url = f"https://www.noon.com/_svc/catalog/api/v3/u/{sku}?locale=ar-sa"
 
-headers = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "application/json",
-    "Accept-Language": "ar-SA,ar;q=0.9",
-    "Referer": "https://www.noon.com/",
-    "Origin": "https://www.noon.com",
-}
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json",
+        "Accept-Language": "ar-SA,ar;q=0.9",
+        "Referer": "https://www.noon.com/",
+        "Origin": "https://www.noon.com",
+    }
 
-try:
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            api_url, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=15),
-            ssl=False,
-        ) as resp:
-            if resp.status != 200:
-                logging.error(f"Noon API status: {resp.status}")
-                return None
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                api_url, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+                ssl=False,
+            ) as resp:
+                if resp.status != 200:
+                    logging.error(f"Noon API status: {resp.status}")
+                    return None
 
-            data = await resp.json()
-            product = data.get("product", {})
-
-            if not product:
-                return None
-
-            title = product.get("product_title", "منتج نون")
-
-            # ── البحث عن أرخص سعر بيع ──
-            best_price = None
-
-            # من variants → offers
-            variants = product.get("variants", [])
-            for variant in variants:
-                offers = variant.get("offers", [])
-                for offer in offers:
-                    # الأولوية: sale_price > price
-                    sp = offer.get("sale_price") or offer.get("price")
-                    if sp:
-                        p = float(sp)
-                        if p > 0 and (best_price is None or p < best_price):
-                            best_price = p
-
-                    # أحيانًا يكون في offer_price
-                    op = offer.get("offer_price")
-                    if op:
-                        p = float(op)
-                        if p > 0 and (best_price is None or p < best_price):
-                            best_price = p
-
-            # من المستوى الأعلى
-            if not best_price:
-                for key in ["sale_price", "price", "special_price"]:
-                    val = product.get(key)
-                    if val:
-                        p = float(val)
-                        if p > 0:
-                            best_price = p
-                            break
-
-            if best_price and best_price > 0:
-                return {
-                    "title": title[:100],
-                    "price": round(best_price, 2),
-                    "currency": "ر.س",
-                    "store": "نون",
-                }
-
-except Exception as e:
-    logging.error(f"Noon API error: {e}")
-
-# ── محاولة ثانية: API بصيغة مختلفة ──
-try:
-    api_url2 = f"https://www.noon.com/saudi-ar/catalog/api/product/{sku}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            api_url2, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=15),
-            ssl=False,
-        ) as resp:
-            if resp.status == 200:
                 data = await resp.json()
-                price = data.get("sale_price") or data.get("price")
-                title = data.get("name") or data.get("title", "منتج نون")
-                if price and float(price) > 0:
+                product = data.get("product", {})
+
+                if not product:
+                    return None
+
+                title = product.get("product_title", "منتج نون")
+
+                # ── البحث عن أرخص سعر بيع ──
+                best_price = None
+
+                # من variants → offers
+                variants = product.get("variants", [])
+                for variant in variants:
+                    offers = variant.get("offers", [])
+                    for offer in offers:
+                        # الأولوية: sale_price > price
+                        sp = offer.get("sale_price") or offer.get("price")
+                        if sp:
+                            p = float(sp)
+                            if p > 0 and (best_price is None or p < best_price):
+                                best_price = p
+
+                        # أحيانًا يكون في offer_price
+                        op = offer.get("offer_price")
+                        if op:
+                            p = float(op)
+                            if p > 0 and (best_price is None or p < best_price):
+                                best_price = p
+
+                # من المستوى الأعلى
+                if not best_price:
+                    for key in ["sale_price", "price", "special_price"]:
+                        val = product.get(key)
+                        if val:
+                            p = float(val)
+                            if p > 0:
+                                best_price = p
+                                break
+
+                if best_price and best_price > 0:
                     return {
-                        "title": str(title)[:100],
-                        "price": round(float(price), 2),
+                        "title": title[:100],
+                        "price": round(best_price, 2),
                         "currency": "ر.س",
                         "store": "نون",
                     }
-except Exception:
-    pass
 
-return None
-```
+    except Exception as e:
+        logging.error(f"Noon API error: {e}")
+
+    # ── محاولة ثانية: API بصيغة مختلفة ──
+    try:
+        api_url2 = f"https://www.noon.com/saudi-ar/catalog/api/product/{sku}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                api_url2, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+                ssl=False,
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    price = data.get("sale_price") or data.get("price")
+                    title = data.get("name") or data.get("title", "منتج نون")
+                    if price and float(price) > 0:
+                        return {
+                            "title": str(title)[:100],
+                            "price": round(float(price), 2),
+                            "currency": "ر.س",
+                            "store": "نون",
+                        }
+    except Exception:
+        pass
+
+    return None
 
 async def _expand_short_url(url: str) -> str:
-“”“تحويل الروابط القصيرة للرابط الكامل”””
-import aiohttp
+    """تحويل الروابط القصيرة للرابط الكامل"""
+    import aiohttp
 
-```
-# أمازون: روابط قصيرة
-if "amzn.eu" in url or "amzn.to" in url or "a.co" in url:
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=10), ssl=False) as r:
-                loc = r.headers.get("Location", "")
-                if loc and "amazon" in loc:
-                    return loc.split("?")[0]
-                async with s.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=10), ssl=False) as r2:
-                    final = str(r2.url).split("?")[0]
-                    if "amazon" in final:
-                        return final
-    except:
-        pass
+    # أمازون: روابط قصيرة
+    if "amzn.eu" in url or "amzn.to" in url or "a.co" in url:
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=10), ssl=False) as r:
+                    loc = r.headers.get("Location", "")
+                    if loc and "amazon" in loc:
+                        return loc.split("?")[0]
+                    async with s.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=10), ssl=False) as r2:
+                        final = str(r2.url).split("?")[0]
+                        if "amazon" in final:
+                            return final
+        except Exception:
+            pass
 
-# شي إن: تحويل رابط التطبيق (sharejump)
-if "sharejump" in url or "api-shein" in url:
-    try:
-        from playwright.async_api import async_playwright
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox"],
-                proxy={
-                    "server": "http://geo.iproyal.com:12321",
-                    "username": "DrncTtwog8wtL5JC",
-                    "password": "RzwbrVcR46tMocu5_country-sa",
-                },
-            )
-            ctx = await browser.new_context(ignore_https_errors=True)
-            page = await ctx.new_page()
-            try:
-                await page.goto(url, timeout=20000)
-            except:
-                pass
-            await page.wait_for_timeout(5000)
-            final = page.url
-            await browser.close()
-            gid = re.search(r"-p-(\d+)", final)
-            logging.info(f"Shein redirect to: {final[:100]}")
-            if gid:
-                return f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
-    except:
-        pass
+    # شي إن: تحويل رابط التطبيق (sharejump)
+    if "sharejump" in url or "api-shein" in url:
+        try:
+            from playwright.async_api import async_playwright
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox"],
+                    proxy={
+                        "server": os.getenv("IPROYAL_PROXY_SERVER", ""),
+                        "username": os.getenv("IPROYAL_PROXY_USER", ""),
+                        "password": os.getenv("IPROYAL_PROXY_PASS", ""),
+                    },
+                )
+                ctx = await browser.new_context(ignore_https_errors=True)
+                page = await ctx.new_page()
+                try:
+                    await page.goto(url, timeout=20000)
+                except Exception:
+                    pass
+                await page.wait_for_timeout(5000)
+                final = page.url
+                await browser.close()
+                gid = re.search(r"-p-(\d+)", final)
+                logging.info(f"Shein redirect to: {final[:100]}")
+                if gid:
+                    return f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
+        except Exception:
+            pass
 
-return url
-```
+    return url
 
 async def _fetch_price_google(url: str, store_name: str) -> Optional[dict]:
-“”“جلب السعر من Google Search كملاذ أخير”””
-import requests as req
-from urllib.parse import quote, urlparse
-try:
-domain = urlparse(url).netloc.replace(“www.”, “”)
-path = urlparse(url).path
-numbers = re.findall(r’\d{5,}’, path)
-query = domain + “ “ + “ “.join(numbers) + “ price SAR”
-search_url = f”https://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={quote(‘https://www.google.com/search?q=’ + query, safe=’’)}&country_code=sa”
-r = req.get(search_url, timeout=30)
-if r.status_code != 200:
-return None
-html = r.text
-logging.info(f”Google HTML length: {len(html)}”)
-sar = re.findall(r’SAR\s*([\d,]+.?\d*)’, html)
-logging.info(f”Google SAR found: {sar[:3]}”)
-if sar:
-price = float(sar[0].replace(’,’, ‘’))
-if price > 0:
-title_match = re.search(r’<h3[^>]*>([^<]+)</h3>’, html)
-title = title_match.group(1) if title_match else store_name
-return {“title”: title[:100], “price”: round(price, 2), “currency”: “ر.س”, “store”: store_name}
-except Exception as e:
-logging.error(f”Google price error: {e}”)
-return None
+    """جلب السعر من Google Search كملاذ أخير"""
+    import requests as req
+    from urllib.parse import quote, urlparse
+    try:
+        domain = urlparse(url).netloc.replace("www.", "")
+        path = urlparse(url).path
+        numbers = re.findall(r'\d{5,}', path)
+        query = domain + " " + " ".join(numbers) + " price SAR"
+        search_url = f"https://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={quote('https://www.google.com/search?q=' + query, safe='')}&country_code=sa"
+        r = req.get(search_url, timeout=30)
+        if r.status_code != 200:
+            return None
+        html = r.text
+        logging.info(f"Google HTML length: {len(html)}")
+        sar = re.findall(r'SAR\s*([\d,]+.?\d*)', html)
+        logging.info(f"Google SAR found: {sar[:3]}")
+        if sar:
+            price = float(sar[0].replace(',', ''))
+            if price > 0:
+                title_match = re.search(r'<h3[^>]*>([^<]+)</h3>', html)
+                title = title_match.group(1) if title_match else store_name
+                return {"title": title[:100], "price": round(price, 2), "currency": "ر.س", "store": store_name}
+    except Exception as e:
+        logging.error(f"Google price error: {e}")
+    return None
 
 async def _fetch_price_scraperapi(url: str, store_name: str) -> Optional[dict]:
-“”“جلب السعر عبر ScraperAPI - يتجاوز حجب المتاجر”””
-import aiohttp
-from bs4 import BeautifulSoup
-from urllib.parse import quote
-encoded_url = quote(url, safe=””)
-api_url = f”https://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={encoded_url}&render=true&country_code=sa&rendering_wait=5000”
-logging.info(f”ScraperAPI trying: {url[:80]}”)
-try:
-async with aiohttp.ClientSession() as session:
-async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=60), ssl=False) as resp:
-if resp.status != 200:
-logging.error(f”ScraperAPI status {resp.status} for {url}”)
-return None
-raw = await resp.read()
-html = raw.decode(“utf-8”, errors=“replace”)
-soup = BeautifulSoup(html, “html.parser”)
-title = _extract_title(soup, store_name)
-price = None
-if “amazon.” in url:
-amz_price = _extract_amazon_price(soup)
-if amz_price and amz_price > 0:
-price = amz_price
-currency = “ر.س”
-if not price:
-ld_result = _extract_price_from_jsonld(soup)
-if ld_result and ld_result[“price”] > 0:
-price = ld_result[“price”]
-currency = ld_result[“currency”]
-if ld_result[“title”]:
-title = ld_result[“title”]
-if not price:
-price = _extract_price_from_meta(soup)
-if price and price > 0:
-return {“title”: re.sub(r”\s+”, “ “, title).strip()[:100], “price”: round(price, 2), “currency”: currency, “store”: store_name}
-except Exception as e:
-logging.error(f”ScraperAPI error for {url}: {e}”)
-return None
+    """جلب السعر عبر ScraperAPI - يتجاوز حجب المتاجر"""
+    import aiohttp
+    from bs4 import BeautifulSoup
+    from urllib.parse import quote
+    encoded_url = quote(url, safe="")
+    api_url = f"https://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={encoded_url}&render=true&country_code=sa&rendering_wait=5000"
+    logging.info(f"ScraperAPI trying: {url[:80]}")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=60), ssl=False) as resp:
+                if resp.status != 200:
+                    logging.error(f"ScraperAPI status {resp.status} for {url}")
+                    return None
+                raw = await resp.read()
+                html = raw.decode("utf-8", errors="replace")
+                soup = BeautifulSoup(html, "html.parser")
+                title = _extract_title(soup, store_name)
+                price = None
+                if "amazon." in url:
+                    amz_price = _extract_amazon_price(soup)
+                    if amz_price and amz_price > 0:
+                        price = amz_price
+                currency = "ر.س"
+                if not price:
+                    ld_result = _extract_price_from_jsonld(soup)
+                    if ld_result and ld_result["price"] > 0:
+                        price = ld_result["price"]
+                        currency = ld_result["currency"]
+                        if ld_result["title"]:
+                            title = ld_result["title"]
+                if not price:
+                    price = _extract_price_from_meta(soup)
+                if price and price > 0:
+                    return {"title": re.sub(r"\s+", " ", title).strip()[:100], "price": round(price, 2), "currency": currency, "store": store_name}
+    except Exception as e:
+        logging.error(f"ScraperAPI error for {url}: {e}")
+    return None
 async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
-“””
-جلب السعر — يدعم أي متجر
-الترتيب الموحّد لكل المتاجر:
-1. aiohttp مباشر (مجاني)
-2. IPRoyal proxy (مجاني)
-3. Playwright متصفح حقيقي (مجاني، ما عدا أمازون)
-4. ScraperAPI (مدفوع — 5000 طلب/شهر)
-5. Google Search (ملاذ أخير)
+    """
+    جلب السعر — يدعم أي متجر
+    الترتيب الموحّد لكل المتاجر:
+    1. aiohttp مباشر (مجاني)
+    2. IPRoyal proxy (مجاني)
+    3. Playwright متصفح حقيقي (مجاني، ما عدا أمازون)
+    4. ScraperAPI (مدفوع — 5000 طلب/شهر)
+    5. Google Search (ملاذ أخير)
 
-```
-استثناء نون: يجرب API الداخلي قبل كل شي
-is_periodic: إذا True = فحص دوري (نسجّل هل استخدم ScraperAPI)
-"""
-import aiohttp, asyncio
-from bs4 import BeautifulSoup
+    استثناء نون: يجرب API الداخلي قبل كل شي
+    is_periodic: إذا True = فحص دوري (نسجّل هل استخدم ScraperAPI)
+    """
+    import aiohttp, asyncio
+    from bs4 import BeautifulSoup
 
-store_name = detect_store_name(url)
-url = await _expand_short_url(url)
-store_name = detect_store_name(url)
+    store_name = detect_store_name(url)
+    url = await _expand_short_url(url)
+    store_name = detect_store_name(url)
 
-# ── نون: نجرب API الداخلي أولاً (مجاني وأسرع) ──
-if "noon.com" in url.lower():
-    result = await fetch_price_noon_api(url)
-    if result:
-        return result
-    logging.info("Noon API failed, trying normal methods...")
+    # ── نون: نجرب API الداخلي أولاً (مجاني وأسرع) ──
+    if "noon.com" in url.lower():
+        result = await fetch_price_noon_api(url)
+        if result:
+            return result
+        logging.info("Noon API failed, trying normal methods...")
 
-# ── الخطوة 1: aiohttp مباشر (مجاني) ──
-result = await _fetch_price_aiohttp(url, store_name)
-if result:
-    return result
-
-# ── الخطوة 2: IPRoyal proxy (مجاني) ──
-result = await _fetch_price_proxy(url, store_name)
-if result:
-    return result
-
-# ── الخطوة 3: Playwright (مجاني، ما عدا أمازون) ──
-if "amazon." not in url:
-    result = await _fetch_price_playwright(url, store_name)
+    # ── الخطوة 1: aiohttp مباشر (مجاني) ──
+    result = await _fetch_price_aiohttp(url, store_name)
     if result:
         return result
 
-# ── الخطوة 4: ScraperAPI مع retry (مدفوع) ──
-for attempt in range(2):
-    result = await _fetch_price_scraperapi(url, store_name)
+    # ── الخطوة 2: IPRoyal proxy (مجاني) ──
+    result = await _fetch_price_proxy(url, store_name)
+    if result:
+        return result
+
+    # ── الخطوة 3: Playwright (مجاني، ما عدا أمازون) ──
+    if "amazon." not in url:
+        result = await _fetch_price_playwright(url, store_name)
+        if result:
+            return result
+
+    # ── الخطوة 4: ScraperAPI مع retry (مدفوع) ──
+    for attempt in range(2):
+        result = await _fetch_price_scraperapi(url, store_name)
+        if result:
+            result["_used_scraperapi"] = True
+            return result
+        if attempt == 0:
+            logging.info(f"ScraperAPI attempt 1 failed, retrying in 3s...")
+            await asyncio.sleep(3)
+
+    # ── الخطوة 5: Google Search (ملاذ أخير) ──
+    logging.info(f"Trying Google for: {url[:50]}")
+    result = await _fetch_price_google(url, store_name)
     if result:
         result["_used_scraperapi"] = True
         return result
-    if attempt == 0:
-        logging.info(f"ScraperAPI attempt 1 failed, retrying in 3s...")
-        await asyncio.sleep(3)
 
-# ── الخطوة 5: Google Search (ملاذ أخير) ──
-logging.info(f"Trying Google for: {url[:50]}")
-result = await _fetch_price_google(url, store_name)
-if result:
-    result["_used_scraperapi"] = True
-    return result
-
-return None
-```
+    return None
 
 def _extract_price_from_jsonld(soup_or_html, is_html=False) -> Optional[dict]:
-“”“استخراج السعر من JSON-LD — يرجّع أقل سعر بيع”””
-from bs4 import BeautifulSoup
+    """استخراج السعر من JSON-LD — يرجّع أقل سعر بيع"""
+    from bs4 import BeautifulSoup
 
-```
-if is_html:
-    soup = BeautifulSoup(soup_or_html, "html.parser")
-else:
-    soup = soup_or_html
+    if is_html:
+        soup = BeautifulSoup(soup_or_html, "html.parser")
+    else:
+        soup = soup_or_html
 
-best = None  # {"title", "price", "currency"}
+    best = None  # {"title", "price", "currency"}
 
-for script in soup.find_all("script", {"type": "application/ld+json"}):
-    try:
-        raw = script.string or ""
-        data = json.loads(raw)
+    for script in soup.find_all("script", {"type": "application/ld+json"}):
+        try:
+            raw = script.string or ""
+            data = json.loads(raw)
 
-        # أحيانًا مصفوفة
-        items = data if isinstance(data, list) else [data]
+            # أحيانًا مصفوفة
+            items = data if isinstance(data, list) else [data]
 
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-
-            # البحث في @graph
-            if "@graph" in item:
-                items.extend(item["@graph"])
-                continue
-
-            title = item.get("name", "")
-
-            # جمع كل الأسعار الممكنة
-            all_offers = []
-
-            offers_raw = item.get("offers", item.get("Offers", {}))
-            if isinstance(offers_raw, dict):
-                if "offers" in offers_raw:
-                    # AggregateOffer
-                    inner = offers_raw["offers"]
-                    if isinstance(inner, list):
-                        all_offers.extend(inner)
-                    elif isinstance(inner, dict):
-                        all_offers.append(inner)
-                else:
-                    all_offers.append(offers_raw)
-            elif isinstance(offers_raw, list):
-                all_offers.extend(offers_raw)
-
-            # إضافة السعر من المستوى الأعلى
-            if item.get("price"):
-                all_offers.append(item)
-
-            for offer in all_offers:
-                if not isinstance(offer, dict):
+            for item in items:
+                if not isinstance(item, dict):
                     continue
 
-                # الأولوية: سعر البيع > السعر العادي
-                for price_key in ["sale_price", "salePrice", "lowPrice", "price", "highPrice"]:
-                    val = offer.get(price_key)
-                    if val is not None:
-                        try:
-                            p = float(str(val).replace(",", "").replace("٬", ""))
-                            if p > 0:
-                                cur_raw = offer.get("priceCurrency", item.get("priceCurrency", "SAR"))
-                                cur = "ر.س"
-                                if str(cur_raw).upper() == "AED":
-                                    cur = "د.إ"
-                                elif str(cur_raw).upper() == "USD":
-                                    cur = "$"
-                                elif str(cur_raw).upper() == "EUR":
-                                    cur = "€"
+                # البحث في @graph
+                if "@graph" in item:
+                    items.extend(item["@graph"])
+                    continue
 
-                                if best is None or p < best["price"]:
-                                    best = {"title": title or "", "price": p, "currency": cur}
-                                break  # وجدنا سعر لهذا الـ offer
-                        except (ValueError, TypeError):
-                            continue
+                title = item.get("name", "")
 
-    except Exception:
-        continue
+                # جمع كل الأسعار الممكنة
+                all_offers = []
 
-return best
-```
+                offers_raw = item.get("offers", item.get("Offers", {}))
+                if isinstance(offers_raw, dict):
+                    if "offers" in offers_raw:
+                        # AggregateOffer
+                        inner = offers_raw["offers"]
+                        if isinstance(inner, list):
+                            all_offers.extend(inner)
+                        elif isinstance(inner, dict):
+                            all_offers.append(inner)
+                    else:
+                        all_offers.append(offers_raw)
+                elif isinstance(offers_raw, list):
+                    all_offers.extend(offers_raw)
+
+                # إضافة السعر من المستوى الأعلى
+                if item.get("price"):
+                    all_offers.append(item)
+
+                for offer in all_offers:
+                    if not isinstance(offer, dict):
+                        continue
+
+                    # الأولوية: سعر البيع > السعر العادي
+                    for price_key in ["sale_price", "salePrice", "lowPrice", "price", "highPrice"]:
+                        val = offer.get(price_key)
+                        if val is not None:
+                            try:
+                                p = float(str(val).replace(",", "").replace("٬", ""))
+                                if p > 0:
+                                    cur_raw = offer.get("priceCurrency", item.get("priceCurrency", "SAR"))
+                                    cur = "ر.س"
+                                    if str(cur_raw).upper() == "AED":
+                                        cur = "د.إ"
+                                    elif str(cur_raw).upper() == "USD":
+                                        cur = "$"
+                                    elif str(cur_raw).upper() == "EUR":
+                                        cur = "€"
+
+                                    if best is None or p < best["price"]:
+                                        best = {"title": title or "", "price": p, "currency": cur}
+                                    break  # وجدنا سعر لهذا الـ offer
+                            except (ValueError, TypeError):
+                                continue
+
+        except Exception:
+            continue
+
+    return best
 
 def _extract_price_from_meta(soup) -> Optional[float]:
-“”“استخراج السعر من meta tags”””
-for attr in [“product:price:amount”, “og:price:amount”]:
-el = soup.find(“meta”, {“property”: attr}) or soup.find(“meta”, {“name”: attr})
-if el and el.get(“content”):
-try:
-pt = re.sub(r”[^\d.]”, “”, el[“content”].replace(”,”, “”))
-if pt:
-p = float(pt)
-if p > 0:
-return p
-except ValueError:
-continue
-return None
+    """استخراج السعر من meta tags"""
+    for attr in ["product:price:amount", "og:price:amount"]:
+        el = soup.find("meta", {"property": attr}) or soup.find("meta", {"name": attr})
+        if el and el.get("content"):
+            try:
+                pt = re.sub(r"[^\d.]", "", el["content"].replace(",", ""))
+                if pt:
+                    p = float(pt)
+                    if p > 0:
+                        return p
+            except ValueError:
+                continue
+    return None
 
-def *extract_amazon_price(soup) -> Optional[float]:
-“”“استخراج السعر الرئيسي من أمازون فقط”””
-# 1) السعر من corePrice div (الأدق)
-core = soup.find(id=“corePrice_feature_div”)
-if core:
-el = core.find(class*=“a-offscreen”)
-if el:
-text = el.get_text(strip=True)
-m = re.search(r’([\d,.]+)’, text.replace(’,’, ‘’))
-if m:
-p = float(m.group(1))
-if p > 0:
-return p
-# 2) priceblock
-for pid in [“priceblock_ourprice”, “priceblock_dealprice”, “priceblock_saleprice”]:
-el = soup.find(id=pid)
-if el:
-m = re.search(r’([\d,.]+)’, el.get_text().replace(’,’, ‘’))
-if m:
-p = float(m.group(1))
-if p > 0:
-return p
-# 3) apex price
-apex = soup.find(id=“apex_offerDisplay_desktop”)
-if apex:
-el = apex.find(class_=“a-offscreen”)
-if el:
-m = re.search(r’([\d,.]+)’, el.get_text().replace(’,’, ‘’))
-if m:
-p = float(m.group(1))
-if p > 0:
-return p
-return None
+def _extract_amazon_price(soup) -> Optional[float]:
+    """استخراج السعر الرئيسي من أمازون فقط"""
+    # 1) السعر من corePrice div (الأدق)
+    core = soup.find(id="corePrice_feature_div")
+    if core:
+        el = core.find(class_="a-offscreen")
+        if el:
+            text = el.get_text(strip=True)
+            m = re.search(r'([\d,.]+)', text.replace(',', ''))
+            if m:
+                p = float(m.group(1))
+                if p > 0:
+                    return p
+    # 2) priceblock
+    for pid in ["priceblock_ourprice", "priceblock_dealprice", "priceblock_saleprice"]:
+        el = soup.find(id=pid)
+        if el:
+            m = re.search(r'([\d,.]+)', el.get_text().replace(',', ''))
+            if m:
+                p = float(m.group(1))
+                if p > 0:
+                    return p
+    # 3) apex price
+    apex = soup.find(id="apex_offerDisplay_desktop")
+    if apex:
+        el = apex.find(class_="a-offscreen")
+        if el:
+            m = re.search(r'([\d,.]+)', el.get_text().replace(',', ''))
+            if m:
+                p = float(m.group(1))
+                if p > 0:
+                    return p
+    return None
 
 async def _fetch_price_proxy(url: str, store_name: str) -> Optional[dict]:
-“”“جلب السعر عبر IPRoyal proxy”””
-import aiohttp
-from bs4 import BeautifulSoup
-headers = {
-“User-Agent”: “Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36”,
-“Accept-Language”: “ar-SA,ar;q=0.9,en;q=0.7”,
-}
-try:
-async with aiohttp.ClientSession() as session:
-async with session.get(url, proxy=IPROYAL_PROXY, headers=headers, timeout=aiohttp.ClientTimeout(total=20), ssl=False) as resp:
-if resp.status != 200:
-return None
-raw = await resp.read()
-html = raw.decode(“utf-8”, errors=“replace”)
-soup = BeautifulSoup(html, “html.parser”)
-if “Maintenance” in html or “blocked” in html.lower():
-return None
-title = _extract_title(soup, store_name)
-price = None
-currency = “ر.س”
-if “amazon.” in url:
-amz_price = _extract_amazon_price(soup)
-if amz_price and amz_price > 0:
-price = amz_price
-if not price:
-ld_result = _extract_price_from_jsonld(soup)
-if ld_result and ld_result[“price”] > 0:
-price = ld_result[“price”]
-currency = ld_result[“currency”]
-if ld_result[“title”]:
-title = ld_result[“title”]
-if not price:
-price = _extract_price_from_meta(soup)
-if price and price > 0:
-return {“title”: re.sub(r”\s+”, “ “, title).strip()[:100], “price”: round(price, 2), “currency”: currency, “store”: store_name}
-except Exception as e:
-logging.error(f”Proxy error for {url}: {e}”)
-return None
+    """جلب السعر عبر IPRoyal proxy"""
+    import aiohttp
+    from bs4 import BeautifulSoup
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "ar-SA,ar;q=0.9,en;q=0.7",
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, proxy=IPROYAL_PROXY, headers=headers, timeout=aiohttp.ClientTimeout(total=20), ssl=False) as resp:
+                if resp.status != 200:
+                    return None
+                raw = await resp.read()
+                html = raw.decode("utf-8", errors="replace")
+                soup = BeautifulSoup(html, "html.parser")
+                if "Maintenance" in html or "blocked" in html.lower():
+                    return None
+                title = _extract_title(soup, store_name)
+                price = None
+                currency = "ر.س"
+                if "amazon." in url:
+                    amz_price = _extract_amazon_price(soup)
+                    if amz_price and amz_price > 0:
+                        price = amz_price
+                if not price:
+                    ld_result = _extract_price_from_jsonld(soup)
+                    if ld_result and ld_result["price"] > 0:
+                        price = ld_result["price"]
+                        currency = ld_result["currency"]
+                        if ld_result["title"]:
+                            title = ld_result["title"]
+                if not price:
+                    price = _extract_price_from_meta(soup)
+                if price and price > 0:
+                    return {"title": re.sub(r"\s+", " ", title).strip()[:100], "price": round(price, 2), "currency": currency, "store": store_name}
+    except Exception as e:
+        logging.error(f"Proxy error for {url}: {e}")
+    return None
 
 async def _fetch_price_aiohttp(url: str, store_name: str) -> Optional[dict]:
-“”“جلب السعر بـ aiohttp (سريعة، للمتاجر اللي ما تحتاج JavaScript)”””
-import aiohttp
-from bs4 import BeautifulSoup
+    """جلب السعر بـ aiohttp (سريعة، للمتاجر اللي ما تحتاج JavaScript)"""
+    import aiohttp
+    from bs4 import BeautifulSoup
 
-```
-headers = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding": "gzip, deflate",
-}
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding": "gzip, deflate",
+    }
 
-try:
-    connector = aiohttp.TCPConnector(ssl=False)
-    async with aiohttp.ClientSession(connector=connector) as session:
-        async with session.get(
-            url, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=20),
-            allow_redirects=True,
-        ) as resp:
+    try:
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.get(
+                url, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=20),
+                allow_redirects=True,
+            ) as resp:
 
-            raw = await resp.read()
-            html = None
-            for enc in ["utf-8", "windows-1256", "latin-1"]:
-                try:
-                    html = raw.decode(enc)
-                    break
-                except UnicodeDecodeError:
-                    continue
-            if not html:
-                html = raw.decode("utf-8", errors="replace")
+                raw = await resp.read()
+                html = None
+                for enc in ["utf-8", "windows-1256", "latin-1"]:
+                    try:
+                        html = raw.decode(enc)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                if not html:
+                    html = raw.decode("utf-8", errors="replace")
 
-            soup = BeautifulSoup(html, "html.parser")
+                soup = BeautifulSoup(html, "html.parser")
 
-            # ── العنوان ──
-            title = _extract_title(soup, store_name)
+                # ── العنوان ──
+                title = _extract_title(soup, store_name)
 
-            # ── السعر (بالترتيب من الأدق للأقل) ──
-            price = None
-            currency = "ر.س"
+                # ── السعر (بالترتيب من الأدق للأقل) ──
+                price = None
+                currency = "ر.س"
 
-            # 0) Amazon specific
-            if "amazon." in url:
-                amz_price = _extract_amazon_price(soup)
-                if amz_price and amz_price > 0:
-                    price = amz_price
+                # 0) Amazon specific
+                if "amazon." in url:
+                    amz_price = _extract_amazon_price(soup)
+                    if amz_price and amz_price > 0:
+                        price = amz_price
 
-            # 1) JSON-LD (skip if Amazon already found)
-            if not price:
-                ld_result = _extract_price_from_jsonld(soup)
-                if ld_result and ld_result["price"] > 0:
-                    price = ld_result["price"]
-                    currency = ld_result["currency"]
-                    if ld_result["title"]:
-                        title = ld_result["title"]
+                # 1) JSON-LD (skip if Amazon already found)
+                if not price:
+                    ld_result = _extract_price_from_jsonld(soup)
+                    if ld_result and ld_result["price"] > 0:
+                        price = ld_result["price"]
+                        currency = ld_result["currency"]
+                        if ld_result["title"]:
+                            title = ld_result["title"]
 
-            # 2) Meta tags
-            if not price:
-                price = _extract_price_from_meta(soup)
+                # 2) Meta tags
+                if not price:
+                    price = _extract_price_from_meta(soup)
 
-            if price and price > 0:
-                return {
-                    "title": re.sub(r"\s+", " ", title).strip()[:100],
-                    "price": round(price, 2),
-                    "currency": currency,
-                    "store": store_name,
-                }
+                if price and price > 0:
+                    return {
+                        "title": re.sub(r"\s+", " ", title).strip()[:100],
+                        "price": round(price, 2),
+                        "currency": currency,
+                        "store": store_name,
+                    }
 
-except Exception as e:
-    logging.error(f"aiohttp error for {url}: {e}")
+    except Exception as e:
+        logging.error(f"aiohttp error for {url}: {e}")
 
-return None
-```
+    return None
 
 def _extract_title(soup, store_name: str) -> str:
-“”“استخراج عنوان المنتج”””
-for getter in [
-lambda: (soup.find(“meta”, {“property”: “og:title”}) or {}).get(“content”, “”),
-lambda: (soup.find(“title”) or type(””, (), {“get_text”: lambda s=None: “”})()).get_text(strip=True),
-lambda: (soup.find(“h1”) or type(””, (), {“get_text”: lambda s=None: “”})()).get_text(strip=True),
-]:
-try:
-val = getter()
-if val and val.strip():
-title = val.strip()
-for sep in [” | “, “ - “, “ — “, “ – “, “ :: “]:
-if sep in title:
-parts = title.split(sep)
-title = max(parts, key=len).strip()
-break
-return title
-except Exception:
-continue
-return f”منتج من {store_name}”
+    """استخراج عنوان المنتج"""
+    for getter in [
+        lambda: (soup.find("meta", {"property": "og:title"}) or {}).get("content", ""),
+        lambda: (soup.find("title") or type("", (), {"get_text": lambda s=None: ""})()).get_text(strip=True),
+        lambda: (soup.find("h1") or type("", (), {"get_text": lambda s=None: ""})()).get_text(strip=True),
+    ]:
+        try:
+            val = getter()
+            if val and val.strip():
+                title = val.strip()
+                for sep in [" | ", " - ", " — ", " – ", " :: "]:
+                    if sep in title:
+                        parts = title.split(sep)
+                        title = max(parts, key=len).strip()
+                        break
+                return title
+        except Exception:
+            continue
+    return f"منتج من {store_name}"
 
 async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
-“”“جلب السعر بمتصفح حقيقي — يتجاوز حماية المتاجر”””
-try:
-from playwright.async_api import async_playwright
-except ImportError:
-logging.warning(“Playwright غير مثبّت”)
-return None
+    """جلب السعر بمتصفح حقيقي — يتجاوز حماية المتاجر"""
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        logging.warning("Playwright غير مثبّت")
+        return None
 
-```
-browser = None
-try:
-    async with async_playwright() as p:
-        # ── إعدادات stealth ──
-        browser = await p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ],
-        )
-        ctx = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-            locale="ar-SA",
-            viewport={"width": 1366, "height": 768},
-            java_script_enabled=True,
-        )
+    browser = None
+    try:
+        async with async_playwright() as p:
+            # ── إعدادات stealth ──
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                ],
+            )
+            ctx = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                locale="ar-SA",
+                viewport={"width": 1366, "height": 768},
+                java_script_enabled=True,
+            )
 
-        # إخفاء أنه headless
-        await ctx.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => false });
-            Object.defineProperty(navigator, 'languages', { get: () => ['ar-SA', 'ar', 'en-US', 'en'] });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-            window.chrome = { runtime: {} };
-        """)
+            # إخفاء أنه headless
+            await ctx.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => false });
+                Object.defineProperty(navigator, 'languages', { get: () => ['ar-SA', 'ar', 'en-US', 'en'] });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                window.chrome = { runtime: {} };
+            """)
 
-        page = await ctx.new_page()
+            page = await ctx.new_page()
 
-        # حظر الموارد الثقيلة
-        await page.route(re.compile(r"\.(png|jpg|jpeg|gif|webp|svg|mp4|webm|woff2?|ttf|otf)$"),
-                         lambda route: route.abort())
+            # حظر الموارد الثقيلة
+            await page.route(re.compile(r"\.(png|jpg|jpeg|gif|webp|svg|mp4|webm|woff2?|ttf|otf)$"),
+                             lambda route: route.abort())
 
-        try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        except Exception:
-            # بعض المتاجر ما تكمل التحميل بس المحتوى يكون موجود
-            pass
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            except Exception:
+                # بعض المتاجر ما تكمل التحميل بس المحتوى يكون موجود
+                pass
 
-        await page.wait_for_timeout(5000)  # انتظار JavaScript
+            await page.wait_for_timeout(5000)  # انتظار JavaScript
 
-        # ── استخراج كل شي من الصفحة بـ JavaScript واحد ──
-        result = await page.evaluate("""
-            () => {
-                let title = '';
-                let price = 0;
-                let currency = 'SAR';
+            # ── استخراج كل شي من الصفحة بـ JavaScript واحد ──
+            result = await page.evaluate("""
+                () => {
+                    let title = '';
+                    let price = 0;
+                    let currency = 'SAR';
 
-                // === العنوان ===
-                const ogTitle = document.querySelector('meta[property="og:title"]');
-                if (ogTitle && ogTitle.content) title = ogTitle.content;
-                else {
-                    const h1 = document.querySelector('h1');
-                    if (h1) title = h1.innerText;
-                    else title = document.title;
-                }
+                    // === العنوان ===
+                    const ogTitle = document.querySelector('meta[property="og:title"]');
+                    if (ogTitle && ogTitle.content) title = ogTitle.content;
+                    else {
+                        const h1 = document.querySelector('h1');
+                        if (h1) title = h1.innerText;
+                        else title = document.title;
+                    }
 
-                // === السعر من JSON-LD ===
-                const scripts = document.querySelectorAll('script[type="application/ld+json"]');
-                let bestPrice = 0;
+                    // === السعر من JSON-LD ===
+                    const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+                    let bestPrice = 0;
 
-                for (const s of scripts) {
-                    try {
-                        let data = JSON.parse(s.textContent);
-                        let items = Array.isArray(data) ? data : [data];
+                    for (const s of scripts) {
+                        try {
+                            let data = JSON.parse(s.textContent);
+                            let items = Array.isArray(data) ? data : [data];
 
-                        // @graph
-                        for (const item of [...items]) {
-                            if (item['@graph']) items.push(...item['@graph']);
-                        }
-
-                        for (const item of items) {
-                            if (!item || typeof item !== 'object') continue;
-
-                            let allOffers = [];
-                            let offers = item.offers || item.Offers;
-
-                            if (Array.isArray(offers)) allOffers = offers;
-                            else if (offers && typeof offers === 'object') {
-                                if (offers.offers) {
-                                    allOffers = Array.isArray(offers.offers) ? offers.offers : [offers.offers];
-                                } else {
-                                    allOffers = [offers];
-                                }
+                            // @graph
+                            for (const item of [...items]) {
+                                if (item['@graph']) items.push(...item['@graph']);
                             }
 
-                            for (const offer of allOffers) {
-                                for (const key of ['sale_price', 'salePrice', 'lowPrice', 'price']) {
-                                    const v = offer[key];
-                                    if (v) {
-                                        const p = parseFloat(String(v).replace(/,/g, ''));
-                                        if (p > 0 && (bestPrice === 0 || p < bestPrice)) {
-                                            bestPrice = p;
-                                            currency = offer.priceCurrency || item.priceCurrency || 'SAR';
-                                            if (item.name) title = item.name;
+                            for (const item of items) {
+                                if (!item || typeof item !== 'object') continue;
+
+                                let allOffers = [];
+                                let offers = item.offers || item.Offers;
+
+                                if (Array.isArray(offers)) allOffers = offers;
+                                else if (offers && typeof offers === 'object') {
+                                    if (offers.offers) {
+                                        allOffers = Array.isArray(offers.offers) ? offers.offers : [offers.offers];
+                                    } else {
+                                        allOffers = [offers];
+                                    }
+                                }
+
+                                for (const offer of allOffers) {
+                                    for (const key of ['sale_price', 'salePrice', 'lowPrice', 'price']) {
+                                        const v = offer[key];
+                                        if (v) {
+                                            const p = parseFloat(String(v).replace(/,/g, ''));
+                                            if (p > 0 && (bestPrice === 0 || p < bestPrice)) {
+                                                bestPrice = p;
+                                                currency = offer.priceCurrency || item.priceCurrency || 'SAR';
+                                                if (item.name) title = item.name;
+                                            }
+                                            break;
                                         }
-                                        break;
                                     }
                                 }
                             }
+                        } catch(e) {}
+                    }
+
+                    if (bestPrice > 0) {
+                        return { title, price: bestPrice, currency };
+                    }
+
+                    // === meta tags ===
+                    for (const name of ['product:price:amount', 'og:price:amount']) {
+                        const el = document.querySelector(`meta[property="${name}"]`);
+                        if (el && el.content) {
+                            const p = parseFloat(el.content.replace(/,/g, ''));
+                            if (p > 0) return { title, price: p, currency };
                         }
-                    } catch(e) {}
-                }
+                    }
 
-                if (bestPrice > 0) {
-                    return { title, price: bestPrice, currency };
-                }
-
-                // === meta tags ===
-                for (const name of ['product:price:amount', 'og:price:amount']) {
-                    const el = document.querySelector(`meta[property="${name}"]`);
-                    if (el && el.content) {
-                        const p = parseFloat(el.content.replace(/,/g, ''));
+                    // === data-price ===
+                    const dp = document.querySelector('[data-price]');
+                    if (dp) {
+                        const p = parseFloat(dp.getAttribute('data-price'));
                         if (p > 0) return { title, price: p, currency };
                     }
-                }
 
-                // === data-price ===
-                const dp = document.querySelector('[data-price]');
-                if (dp) {
-                    const p = parseFloat(dp.getAttribute('data-price'));
-                    if (p > 0) return { title, price: p, currency };
-                }
+                    // === النص المرئي — نبحث عن سعر البيع (الأصغر) ===
+                    const priceSelectors = [
+                        '.sale-price', '.special-price', '.offer-price',
+                        '.current-price', '.price-now', '.pdp-price',
+                        '[class*="sale"] [class*="price"]',
+                        '[class*="special"] [class*="price"]',
+                        '[class*="current"] [class*="price"]',
+                        '[class*="price"]:not([class*="old"]):not([class*="was"]):not([class*="before"]):not([class*="original"]):not([class*="regular"]):not([class*="list"])',
+                        '.price', 'span.price',
+                    ];
 
-                // === النص المرئي — نبحث عن سعر البيع (الأصغر) ===
-                const priceSelectors = [
-                    '.sale-price', '.special-price', '.offer-price',
-                    '.current-price', '.price-now', '.pdp-price',
-                    '[class*="sale"] [class*="price"]',
-                    '[class*="special"] [class*="price"]',
-                    '[class*="current"] [class*="price"]',
-                    '[class*="price"]:not([class*="old"]):not([class*="was"]):not([class*="before"]):not([class*="original"]):not([class*="regular"]):not([class*="list"])',
-                    '.price', 'span.price',
-                ];
+                    let candidates = [];
+                    for (const sel of priceSelectors) {
+                        try {
+                            const els = document.querySelectorAll(sel);
+                            for (const el of els) {
+                                const rect = el.getBoundingClientRect();
+                                if (rect.width === 0 || rect.height === 0) continue; // مخفي
 
-                let candidates = [];
-                for (const sel of priceSelectors) {
-                    try {
-                        const els = document.querySelectorAll(sel);
-                        for (const el of els) {
-                            const rect = el.getBoundingClientRect();
-                            if (rect.width === 0 || rect.height === 0) continue; // مخفي
-
-                            const text = el.innerText.trim();
-                            const match = text.match(/([\\d,]+\\.?\\d*)/);
-                            if (match) {
-                                const num = parseFloat(match[1].replace(/,/g, ''));
-                                if (num > 0 && num < 500000) {
-                                    candidates.push(num);
+                                const text = el.innerText.trim();
+                                const match = text.match(/([\\d,]+\\.?\\d*)/);
+                                if (match) {
+                                    const num = parseFloat(match[1].replace(/,/g, ''));
+                                    if (num > 0 && num < 500000) {
+                                        candidates.push(num);
+                                    }
                                 }
                             }
-                        }
-                    } catch(e) {}
+                        } catch(e) {}
+                    }
+
+                    // نأخذ أصغر سعر (غالباً هو سعر البيع)
+                    if (candidates.length > 0) {
+                        const minPrice = Math.min(...candidates);
+                        return { title, price: minPrice, currency };
+                    }
+
+                    return null;
+                }
+            """)
+
+            await browser.close()
+            browser = None
+
+            if result and result.get("price", 0) > 0:
+                cur = "ر.س"
+                cur_raw = str(result.get("currency", "SAR")).upper()
+                if cur_raw == "AED":
+                    cur = "د.إ"
+                elif cur_raw == "USD":
+                    cur = "$"
+                elif cur_raw == "EUR":
+                    cur = "€"
+
+                title = re.sub(r"\s+", " ", result.get("title", store_name)).strip()
+                for sep in [" | ", " - ", " — ", " – "]:
+                    if sep in title:
+                        parts = title.split(sep)
+                        title = max(parts, key=len).strip()
+                        break
+
+                return {
+                    "title": title[:100],
+                    "price": round(result["price"], 2),
+                    "currency": cur,
+                    "store": store_name,
                 }
 
-                // نأخذ أصغر سعر (غالباً هو سعر البيع)
-                if (candidates.length > 0) {
-                    const minPrice = Math.min(...candidates);
-                    return { title, price: minPrice, currency };
-                }
+    except Exception as e:
+        logging.error(f"Playwright error for {url}: {e}")
 
-                return null;
-            }
-        """)
+    if browser:
+        try:
+            await browser.close()
+        except Exception:
+            pass
 
-        await browser.close()
-        browser = None
-
-        if result and result.get("price", 0) > 0:
-            cur = "ر.س"
-            cur_raw = str(result.get("currency", "SAR")).upper()
-            if cur_raw == "AED":
-                cur = "د.إ"
-            elif cur_raw == "USD":
-                cur = "$"
-            elif cur_raw == "EUR":
-                cur = "€"
-
-            title = re.sub(r"\s+", " ", result.get("title", store_name)).strip()
-            for sep in [" | ", " - ", " — ", " – "]:
-                if sep in title:
-                    parts = title.split(sep)
-                    title = max(parts, key=len).strip()
-                    break
-
-            return {
-                "title": title[:100],
-                "price": round(result["price"], 2),
-                "currency": cur,
-                "store": store_name,
-            }
-
-except Exception as e:
-    logging.error(f"Playwright error for {url}: {e}")
-
-if browser:
-    try:
-        await browser.close()
-    except Exception:
-        pass
-
-return None
-```
+    return None
 
 # ═══════════════════════════════════════════════════════════
 
@@ -1263,127 +1237,121 @@ return None
 # ═══════════════════════════════════════════════════════════
 
 async def check_prices_free(bot):
-“”“فحص المنتجات اللي تنجلب مجاناً — كل ساعة”””
-logging.info(“⏰ فحص دوري — منتجات مجانية”)
-conn = get_db()
-now = datetime.now().isoformat()
+    """فحص المنتجات اللي تنجلب مجاناً — كل ساعة"""
+    logging.info("⏰ فحص دوري — منتجات مجانية")
+    conn = get_db()
+    now = datetime.now().isoformat()
 
-```
-products = conn.execute("""
-    SELECT p.*, u.user_id FROM products p
-    JOIN users u ON p.user_id = u.user_id
-    WHERE u.expires_at > ? AND p.fetch_method = 'free'
-""", (now,)).fetchall()
+    products = conn.execute("""
+        SELECT p.*, u.user_id FROM products p
+        JOIN users u ON p.user_id = u.user_id
+        WHERE u.expires_at > ? AND p.fetch_method = 'free'
+    """, (now,)).fetchall()
 
-checked = 0
-for prod in products:
-    prod = dict(prod)
-    try:
-        result = await fetch_price(prod["url"], is_periodic=True)
-        if not result:
-            continue
+    checked = 0
+    for prod in products:
+        prod = dict(prod)
+        try:
+            result = await fetch_price(prod["url"], is_periodic=True)
+            if not result:
+                continue
 
-        # لو المنتج اتضح إنه يحتاج ScraperAPI، نحدّث fetch_method
-        if result.get("_used_scraperapi"):
-            conn.execute("UPDATE products SET fetch_method = 'scraperapi' WHERE id = ?", (prod["id"],))
-            logging.info(f"📌 منتج {prod['id']} تحوّل لـ scraperapi")
+            # لو المنتج اتضح إنه يحتاج ScraperAPI، نحدّث fetch_method
+            if result.get("_used_scraperapi"):
+                conn.execute("UPDATE products SET fetch_method = 'scraperapi' WHERE id = ?", (prod["id"],))
+                logging.info(f"📌 منتج {prod['id']} تحوّل لـ scraperapi")
 
-        checked += 1
-        await _process_price_update(conn, bot, prod["user_id"], prod, result)
+            checked += 1
+            await _process_price_update(conn, bot, prod["user_id"], prod, result)
 
-    except Exception as e:
-        logging.error(f"Check error (free): {e}")
+        except Exception as e:
+            logging.error(f"Check error (free): {e}")
 
-conn.commit()
-conn.close()
-logging.info(f"✅ فحص المجانية انتهى — {checked} منتج")
-```
+    conn.commit()
+    conn.close()
+    logging.info(f"✅ فحص المجانية انتهى — {checked} منتج")
 
 async def check_prices_scraperapi(bot):
-“”“فحص المنتجات اللي تحتاج ScraperAPI — كل يوم”””
-logging.info(“⏰ فحص دوري — منتجات ScraperAPI”)
-conn = get_db()
-now = datetime.now().isoformat()
+    """فحص المنتجات اللي تحتاج ScraperAPI — كل يوم"""
+    logging.info("⏰ فحص دوري — منتجات ScraperAPI")
+    conn = get_db()
+    now = datetime.now().isoformat()
 
-```
-products = conn.execute("""
-    SELECT p.*, u.user_id FROM products p
-    JOIN users u ON p.user_id = u.user_id
-    WHERE u.expires_at > ? AND p.fetch_method = 'scraperapi'
-""", (now,)).fetchall()
+    products = conn.execute("""
+        SELECT p.*, u.user_id FROM products p
+        JOIN users u ON p.user_id = u.user_id
+        WHERE u.expires_at > ? AND p.fetch_method = 'scraperapi'
+    """, (now,)).fetchall()
 
-checked = 0
-for prod in products:
-    prod = dict(prod)
-    try:
-        result = await fetch_price(prod["url"], is_periodic=True)
-        if not result:
-            continue
+    checked = 0
+    for prod in products:
+        prod = dict(prod)
+        try:
+            result = await fetch_price(prod["url"], is_periodic=True)
+            if not result:
+                continue
 
-        # لو المنتج نجح مجاناً هالمرة، نرجّعه للفحص كل ساعة
-        if not result.get("_used_scraperapi"):
-            conn.execute("UPDATE products SET fetch_method = 'free' WHERE id = ?", (prod["id"],))
-            logging.info(f"📌 منتج {prod['id']} رجع مجاني")
+            # لو المنتج نجح مجاناً هالمرة، نرجّعه للفحص كل ساعة
+            if not result.get("_used_scraperapi"):
+                conn.execute("UPDATE products SET fetch_method = 'free' WHERE id = ?", (prod["id"],))
+                logging.info(f"📌 منتج {prod['id']} رجع مجاني")
 
-        checked += 1
-        await _process_price_update(conn, bot, prod["user_id"], prod, result)
+            checked += 1
+            await _process_price_update(conn, bot, prod["user_id"], prod, result)
 
-    except Exception as e:
-        logging.error(f"Check error (scraperapi): {e}")
+        except Exception as e:
+            logging.error(f"Check error (scraperapi): {e}")
 
-conn.commit()
-conn.close()
-logging.info(f"✅ فحص ScraperAPI انتهى — {checked} منتج")
-```
+    conn.commit()
+    conn.close()
+    logging.info(f"✅ فحص ScraperAPI انتهى — {checked} منتج")
 
 async def _process_price_update(conn, bot, uid, prod, result):
-“”“معالجة تحديث السعر وإرسال التنبيه”””
-new_price = result[“price”]
-old_price = prod[“current_price”]
+    """معالجة تحديث السعر وإرسال التنبيه"""
+    new_price = result["price"]
+    old_price = prod["current_price"]
 
-```
-# تحديث
-new_lowest = min(prod.get("lowest_price") or float("inf"), new_price)
-conn.execute("""
-    UPDATE products SET current_price = ?, lowest_price = ?, last_checked = ?
-    WHERE id = ?
-""", (new_price, new_lowest, datetime.now().isoformat(), prod["id"]))
-
-if new_price != old_price:
+    # تحديث
+    new_lowest = min(prod.get("lowest_price") or float("inf"), new_price)
     conn.execute("""
-        INSERT INTO price_history (product_id, price) VALUES (?, ?)
-    """, (prod["id"], new_price))
+        UPDATE products SET current_price = ?, lowest_price = ?, last_checked = ?
+        WHERE id = ?
+    """, (new_price, new_lowest, datetime.now().isoformat(), prod["id"]))
 
-# التنبيه
-should_alert = False
-if prod.get("target_price"):
-    if new_price <= prod["target_price"] and new_price < old_price:
-        should_alert = True
-else:
-    if new_price < old_price:
-        should_alert = True
+    if new_price != old_price:
+        conn.execute("""
+            INSERT INTO price_history (product_id, price) VALUES (?, ?)
+        """, (prod["id"], new_price))
 
-if should_alert:
-    drop = old_price - new_price
-    cur = prod.get("currency", "ر.س")
-    msg = (
-        f"🔔 *تنبيه نزول سعر!*\n\n"
-        f"📦 {prod['title'][:60]}\n"
-        f"💰 السعر القديم: {old_price} {cur}\n"
-        f"🔥 السعر الجديد: {new_price} {cur}\n"
-        f"📉 وفّرت: {drop:.0f} {cur}\n"
-        f"📊 أقل سعر مسجّل: {new_lowest} {cur}\n\n"
-        f"🔗 [اشترِ الآن]({prod['url']})"
-    )
-    try:
-        await bot.send_message(
-            chat_id=uid, text=msg,
-            parse_mode="Markdown",
-            disable_web_page_preview=True,
+    # التنبيه
+    should_alert = False
+    if prod.get("target_price"):
+        if new_price <= prod["target_price"] and new_price < old_price:
+            should_alert = True
+    else:
+        if new_price < old_price:
+            should_alert = True
+
+    if should_alert:
+        drop = old_price - new_price
+        cur = prod.get("currency", "ر.س")
+        msg = (
+            f"🔔 *تنبيه نزول سعر!*\n\n"
+            f"📦 {prod['title'][:60]}\n"
+            f"💰 السعر القديم: {old_price} {cur}\n"
+            f"🔥 السعر الجديد: {new_price} {cur}\n"
+            f"📉 وفّرت: {drop:.0f} {cur}\n"
+            f"📊 أقل سعر مسجّل: {new_lowest} {cur}\n\n"
+            f"🔗 [اشترِ الآن]({prod['url']})"
         )
-    except Exception as e:
-        logging.error(f"Alert error to {uid}: {e}")
-```
+        try:
+            await bot.send_message(
+                chat_id=uid, text=msg,
+                parse_mode="Markdown",
+                disable_web_page_preview=True,
+            )
+        except Exception as e:
+            logging.error(f"Alert error to {uid}: {e}")
 
 # ═══════════════════════════════════════════════════════════
 
@@ -1400,32 +1368,32 @@ user_states: Dict[int, Dict[str, Any]] = {}
 # ═══════════════════════════════════════════════════════════
 
 def build_main_menu_keyboard():
-return {
-“inline_keyboard”: [
-[{“text”: “🆓 جرّب مجانًا (منتج واحد)”, “callback_data”: “plan_free”}],
-[{“text”: “⭐ الأساسية — ٣ منتجات / 9 ر.س”, “callback_data”: “plan_basic”}],
-[{“text”: “💎 برو — ١٠ منتجات / 29 ر.س”, “callback_data”: “plan_pro”}],
-]
-}
+    return {
+        "inline_keyboard": [
+            [{"text": "🆓 جرّب مجانًا (منتج واحد)", "callback_data": "plan_free"}],
+            [{"text": "⭐ الأساسية — ٣ منتجات / 9 ر.س", "callback_data": "plan_basic"}],
+            [{"text": "💎 برو — ١٠ منتجات / 29 ر.س", "callback_data": "plan_pro"}],
+        ]
+    }
 
 def build_paid_plan_keyboard(plan_key: str):
-plan = PLANS[plan_key]
-salla_url = plan.get(“salla_url”, SALLA_STORE_URL)
-return {
-“inline_keyboard”: [
-[{“text”: f”💳 ادفع {plan[‘price’]} ر.س”, “url”: salla_url}],
-[{“text”: “✅ دفعت — أرسل رقم الطلب”, “callback_data”: f”paid_{plan_key}”}],
-[{“text”: “⬅️ رجوع”, “callback_data”: “back_to_menu”}],
-]
-}
+    plan = PLANS[plan_key]
+    salla_url = plan.get("salla_url", SALLA_STORE_URL)
+    return {
+        "inline_keyboard": [
+            [{"text": f"💳 ادفع {plan['price']} ر.س", "url": salla_url}],
+            [{"text": "✅ دفعت — أرسل رقم الطلب", "callback_data": f"paid_{plan_key}"}],
+            [{"text": "⬅️ رجوع", "callback_data": "back_to_menu"}],
+        ]
+    }
 
 def build_upgrade_keyboard():
-return {
-“inline_keyboard”: [
-[{“text”: “⭐ الأساسية — 9 ر.س”, “callback_data”: “plan_basic”}],
-[{“text”: “💎 برو — 29 ر.س”, “callback_data”: “plan_pro”}],
-]
-}
+    return {
+        "inline_keyboard": [
+            [{"text": "⭐ الأساسية — 9 ر.س", "callback_data": "plan_basic"}],
+            [{"text": "💎 برو — 29 ر.س", "callback_data": "plan_pro"}],
+        ]
+    }
 
 # ═══════════════════════════════════════════════════════════
 
@@ -1434,600 +1402,598 @@ return {
 # ═══════════════════════════════════════════════════════════
 
 def main():
-from telegram import Update, BotCommand
-from telegram.ext import (
-Application, CommandHandler, MessageHandler,
-CallbackQueryHandler, filters,
-)
+    from telegram import Update, BotCommand
+    from telegram.ext import (
+    Application, CommandHandler, MessageHandler,
+    CallbackQueryHandler, filters,
+    )
 
-```
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
+    logging.basicConfig(
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        level=logging.INFO,
+    )
 
-init_db()
-app = Application.builder().token(BOT_TOKEN).build()
+    init_db()
+    app = Application.builder().token(BOT_TOKEN).build()
 
-# ─── /start ───────────────────────────────────────
-async def cmd_start(update: Update, context):
-    u = update.effective_user
-    ensure_user(u.id, u.first_name, u.username or "")
-    user_states.pop(u.id, None)  # مسح أي حالة قديمة
+    # ─── /start ───────────────────────────────────────
+    async def cmd_start(update: Update, context):
+        u = update.effective_user
+        ensure_user(u.id, u.first_name, u.username or "")
+        user_states.pop(u.id, None)  # مسح أي حالة قديمة
 
-    user_data = get_user(u.id)
+        user_data = get_user(u.id)
 
-    if user_data and user_data.get("plan") and user_data.get("expires_at"):
-        expiry = datetime.fromisoformat(user_data["expires_at"])
-        if expiry > datetime.now():
-            remaining = (expiry - datetime.now()).days
-            products = get_user_products(u.id)
-            max_p = user_data["max_products"]
+        if user_data and user_data.get("plan") and user_data.get("expires_at"):
+            expiry = datetime.fromisoformat(user_data["expires_at"])
+            if expiry > datetime.now():
+                remaining = (expiry - datetime.now()).days
+                products = get_user_products(u.id)
+                max_p = user_data["max_products"]
 
-            text = (
-                f"👋 أهلاً فيك!\n\n"
-                f"📋 *باقتك:* {user_data['plan_name']}\n"
-                f"📦 المنتجات: {len(products)}/{max_p}\n"
-                f"📅 متبقي: {remaining} يوم\n\n"
-                f"أرسل رابط المنتج اللي تبغى تتبّعه 🔗\n\n"
-                f"─────────────────────\n"
-                f"أو اختر باقة للترقية:"
-            )
+                text = (
+                    f"👋 أهلاً فيك!\n\n"
+                    f"📋 *باقتك:* {user_data['plan_name']}\n"
+                    f"📦 المنتجات: {len(products)}/{max_p}\n"
+                    f"📅 متبقي: {remaining} يوم\n\n"
+                    f"أرسل رابط المنتج اللي تبغى تتبّعه 🔗\n\n"
+                    f"─────────────────────\n"
+                    f"أو اختر باقة للترقية:"
+                )
+                await update.message.reply_text(
+                    text, parse_mode="Markdown",
+                    reply_markup=build_main_menu_keyboard(),
+                )
+                return
+
+        await update.message.reply_text(
+            "👋 أهلاً فيك في *نبّهني*!\n\n"
+            "🔔 نتابع لك أسعار المنتجات من أي متجر إلكتروني "
+            "وننبّهك أول ما ينزل السعر.\n\n"
+            "اختر الباقة المناسبة لك:",
+            parse_mode="Markdown",
+            reply_markup=build_main_menu_keyboard(),
+        )
+
+    # ─── /list ────────────────────────────────────────
+    async def cmd_list(update: Update, context):
+        products = get_user_products(update.effective_user.id)
+        user_data = get_user(update.effective_user.id)
+
+        if not products:
             await update.message.reply_text(
-                text, parse_mode="Markdown",
+                "📭 ما عندك منتجات متتبعة.\n\nأرسل رابط أي منتج لبدء التتبع 🔗"
+            )
+            return
+
+        max_p = user_data["max_products"] if user_data else 1
+        text = f"📦 *منتجاتك* ({len(products)}/{max_p}):\n\n"
+
+        for i, p in enumerate(products, 1):
+            status = "🟢" if p["current_price"] < p["initial_price"] else "⚪"
+            cur = p.get("currency", "ر.س")
+            text += (
+                f"{status} *{i}. {p['title'][:45]}*\n"
+                f"   💰 الحالي: {p['current_price']} {cur}\n"
+                f"   📉 أقل سعر: {p['lowest_price']} {cur}\n"
+                f"   🏪 {p['store']}\n\n"
+            )
+
+        await update.message.reply_text(text, parse_mode="Markdown")
+
+    # ─── /plan ────────────────────────────────────────
+    async def cmd_plan(update: Update, context):
+        user_data = get_user(update.effective_user.id)
+
+        if not user_data or not user_data.get("plan"):
+            await update.message.reply_text(
+                "⚠️ ما عندك باقة.\n\nاختر باقة:",
                 reply_markup=build_main_menu_keyboard(),
             )
             return
 
-    await update.message.reply_text(
-        "👋 أهلاً فيك في *نبّهني*!\n\n"
-        "🔔 نتابع لك أسعار المنتجات من أي متجر إلكتروني "
-        "وننبّهك أول ما ينزل السعر.\n\n"
-        "اختر الباقة المناسبة لك:",
-        parse_mode="Markdown",
-        reply_markup=build_main_menu_keyboard(),
-    )
+        expiry = datetime.fromisoformat(user_data["expires_at"])
+        activated = datetime.fromisoformat(user_data["activated_at"])
+        remaining = max(0, (expiry - datetime.now()).days)
+        products = get_user_products(update.effective_user.id)
+        plan_info = PLANS.get(user_data["plan"], {})
+        is_expired = expiry < datetime.now()
 
-# ─── /list ────────────────────────────────────────
-async def cmd_list(update: Update, context):
-    products = get_user_products(update.effective_user.id)
-    user_data = get_user(update.effective_user.id)
-
-    if not products:
-        await update.message.reply_text(
-            "📭 ما عندك منتجات متتبعة.\n\nأرسل رابط أي منتج لبدء التتبع 🔗"
-        )
-        return
-
-    max_p = user_data["max_products"] if user_data else 1
-    text = f"📦 *منتجاتك* ({len(products)}/{max_p}):\n\n"
-
-    for i, p in enumerate(products, 1):
-        status = "🟢" if p["current_price"] < p["initial_price"] else "⚪"
-        cur = p.get("currency", "ر.س")
-        text += (
-            f"{status} *{i}. {p['title'][:45]}*\n"
-            f"   💰 الحالي: {p['current_price']} {cur}\n"
-            f"   📉 أقل سعر: {p['lowest_price']} {cur}\n"
-            f"   🏪 {p['store']}\n\n"
+        text = (
+            f"📋 *تفاصيل باقتك*\n\n"
+            f"الباقة: {plan_info.get('name', '')}\n"
+            f"الحالة: {'❌ منتهية' if is_expired else '✅ فعّالة'}\n"
+            f"📦 المنتجات: {len(products)}/{user_data['max_products']}\n"
+            f"📅 التفعيل: {activated.strftime('%Y/%m/%d')}\n"
+            f"📅 الانتهاء: {expiry.strftime('%Y/%m/%d')}\n"
+            f"⏳ متبقي: {remaining} يوم"
         )
 
-    await update.message.reply_text(text, parse_mode="Markdown")
+        keyboard = None
+        if is_expired or user_data["plan"] == "free":
+            text += "\n\n─────────────────────\nترقّي باقتك:"
+            keyboard = build_upgrade_keyboard()
 
-# ─── /plan ────────────────────────────────────────
-async def cmd_plan(update: Update, context):
-    user_data = get_user(update.effective_user.id)
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
-    if not user_data or not user_data.get("plan"):
-        await update.message.reply_text(
-            "⚠️ ما عندك باقة.\n\nاختر باقة:",
-            reply_markup=build_main_menu_keyboard(),
-        )
-        return
+    # ─── /remove ──────────────────────────────────────
+    async def cmd_remove(update: Update, context):
+        products = get_user_products(update.effective_user.id)
 
-    expiry = datetime.fromisoformat(user_data["expires_at"])
-    activated = datetime.fromisoformat(user_data["activated_at"])
-    remaining = max(0, (expiry - datetime.now()).days)
-    products = get_user_products(update.effective_user.id)
-    plan_info = PLANS.get(user_data["plan"], {})
-    is_expired = expiry < datetime.now()
-
-    text = (
-        f"📋 *تفاصيل باقتك*\n\n"
-        f"الباقة: {plan_info.get('name', '')}\n"
-        f"الحالة: {'❌ منتهية' if is_expired else '✅ فعّالة'}\n"
-        f"📦 المنتجات: {len(products)}/{user_data['max_products']}\n"
-        f"📅 التفعيل: {activated.strftime('%Y/%m/%d')}\n"
-        f"📅 الانتهاء: {expiry.strftime('%Y/%m/%d')}\n"
-        f"⏳ متبقي: {remaining} يوم"
-    )
-
-    keyboard = None
-    if is_expired or user_data["plan"] == "free":
-        text += "\n\n─────────────────────\nترقّي باقتك:"
-        keyboard = build_upgrade_keyboard()
-
-    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
-
-# ─── /remove ──────────────────────────────────────
-async def cmd_remove(update: Update, context):
-    products = get_user_products(update.effective_user.id)
-
-    if not products:
-        await update.message.reply_text("📭 ما عندك منتجات.")
-        return
-
-    buttons = []
-    for p in products:
-        buttons.append([{
-            "text": f"🗑 {p['title'][:35]}",
-            "callback_data": f"del_{p['id']}",
-        }])
-    buttons.append([{"text": "⬅️ إلغاء", "callback_data": "cancel_action"}])
-
-    await update.message.reply_text(
-        "🗑 *اختر المنتج للحذف:*",
-        parse_mode="Markdown",
-        reply_markup={"inline_keyboard": buttons},
-    )
-
-# ─── /report ──────────────────────────────────────
-async def cmd_report(update: Update, context):
-    if context.args:
-        report_text = " ".join(context.args)
-        u = update.effective_user
-        save_report(u.id, report_text)
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"📬 *بلاغ جديد*\n\n👤 {u.first_name} (`{u.id}`)\n💬 {report_text}",
-            parse_mode="Markdown",
-            reply_markup={"inline_keyboard": [
-                [{"text": "💬 رد على العميل", "callback_data": f"reply_{u.id}"}]
-            ]},
-        )
-        await update.message.reply_text("✅ تم إرسال بلاغك. شكرًا!")
-        return
-
-    user_states[update.effective_user.id] = {"state": "waiting_report"}
-    await update.message.reply_text(
-        "📝 اكتب مشكلتك أو اقتراحك:",
-        reply_markup={"inline_keyboard": [[{"text": "⬅️ إلغاء", "callback_data": "cancel_action"}]]},
-    )
-
-# ─── /reply (أدمن) — رد على عميل ─────────────────
-async def cmd_reply(update: Update, context):
-    """الأدمن يرد على عميل: /reply 123456 رسالة الرد"""
-    if update.effective_user.id != ADMIN_ID:
-        return
-    if len(context.args) < 2:
-        await update.message.reply_text("استخدم: /reply [user_id] [الرسالة]")
-        return
-
-    target_uid = context.args[0]
-    reply_text = " ".join(context.args[1:])
-
-    try:
-        await context.bot.send_message(
-            chat_id=int(target_uid),
-            text=f"💬 *رد من فريق نبّهني:*\n\n{reply_text}",
-            parse_mode="Markdown",
-        )
-        await update.message.reply_text(f"✅ تم إرسال الرد لـ `{target_uid}`", parse_mode="Markdown")
-    except Exception as e:
-        await update.message.reply_text(f"❌ فشل الإرسال: {e}")
-
-# ─── /help ────────────────────────────────────────
-async def cmd_help(update: Update, context):
-    await update.message.reply_text(
-        "📖 *مساعدة نبّهني*\n\n"
-        "🔗 *لإضافة منتج:* أرسل رابطه مباشرة\n\n"
-        "📋 *الأوامر:*\n"
-        "/start — اختيار باقة\n"
-        "/list — منتجاتك المراقبة\n"
-        "/plan — تفاصيل باقتك\n"
-        "/remove — حذف منتج\n"
-        "/report — بلّغ عن مشكلة\n\n"
-        "🏪 ندعم أغلب المتاجر الإلكترونية.\n"
-        "جرّب أرسل رابط من أي متجر!\n\n"
-        "💡 البوت يفحص الأسعار كل ٥ دقائق وينبّهك فورًا.",
-        parse_mode="Markdown",
-    )
-
-# ─── /stats و /users (أدمن) ───────────────────────
-async def cmd_stats(update: Update, context):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    await update.message.reply_text(get_admin_stats(), parse_mode="Markdown")
-
-async def cmd_users(update: Update, context):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    await update.message.reply_text(get_admin_users_detail(), parse_mode="Markdown")
-
-# ─── الأزرار ──────────────────────────────────────
-async def handle_callback(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    u = query.from_user
-    ensure_user(u.id, u.first_name, u.username or "")
-
-    # إلغاء
-    if data == "cancel_action":
-        user_states.pop(u.id, None)
-        await query.edit_message_text("✅ تم الإلغاء.")
-        return
-
-    # القائمة
-    if data == "back_to_menu":
-        user_states.pop(u.id, None)
-        await query.edit_message_text(
-            "👋 أهلاً فيك في *نبّهني*!\n\n"
-            "🔔 نتابع لك أسعار المنتجات وننبّهك أول ما ينزل السعر.\n\n"
-            "اختر الباقة:",
-            parse_mode="Markdown",
-            reply_markup=build_main_menu_keyboard(),
-        )
-        return
-
-    # المجانية
-    if data == "plan_free":
-        user_data = get_user(u.id)
-        if user_data and user_data.get("used_free_trial"):
-            await query.edit_message_text(
-                "⚠️ سبق لك استخدام التجربة المجانية.\n\nاختر باقة مدفوعة:",
-                reply_markup=build_upgrade_keyboard(),
-            )
+        if not products:
+            await update.message.reply_text("📭 ما عندك منتجات.")
             return
-        msg = activate_plan(u.id, "free")
-        await query.edit_message_text(msg, parse_mode="Markdown")
-        return
 
-    # المدفوعة
-    if data in ("plan_basic", "plan_pro"):
-        plan_key = data.replace("plan_", "")
-        plan = PLANS[plan_key]
-        await query.edit_message_text(
-            f"{plan['description']}\n{'─' * 25}\n\n"
-            f"1️⃣ اضغط الزر أدناه للدفع\n"
-            f"2️⃣ بعد الدفع اضغط \"✅ دفعت\" وأرسل رقم الطلب",
+        buttons = []
+        for p in products:
+            buttons.append([{
+                "text": f"🗑 {p['title'][:35]}",
+                "callback_data": f"del_{p['id']}",
+            }])
+        buttons.append([{"text": "⬅️ إلغاء", "callback_data": "cancel_action"}])
+
+        await update.message.reply_text(
+            "🗑 *اختر المنتج للحذف:*",
             parse_mode="Markdown",
-            reply_markup=build_paid_plan_keyboard(plan_key),
+            reply_markup={"inline_keyboard": buttons},
         )
-        return
 
-    # تأكيد الدفع
-    if data.startswith("paid_"):
-        plan_key = data.replace("paid_", "")
-        user_states[u.id] = {"state": "waiting_order", "plan_key": plan_key}
-        await query.edit_message_text(
-            "📝 أرسل رقم الطلب من سلة:\n\n_(تلقاه في إيميل تأكيد الطلب)_",
-            parse_mode="Markdown",
-            reply_markup={"inline_keyboard": [[{"text": "⬅️ رجوع", "callback_data": f"plan_{plan_key}"}]]},
-        )
-        return
-
-    # حذف منتج
-    if data.startswith("del_"):
-        pid = int(data.replace("del_", ""))
-        conn = get_db()
-        prod = conn.execute("SELECT title FROM products WHERE id = ? AND user_id = ?", (pid, u.id)).fetchone()
-        conn.close()
-
-        if prod:
-            delete_product(pid)
-            remaining = len(get_user_products(u.id))
-            user_data = get_user(u.id)
-            max_p = user_data["max_products"] if user_data else 1
-
-            await query.edit_message_text(
-                f"🗑 تم حذف: *{prod['title'][:45]}*\n\n"
-                f"📦 المتبقية: {remaining}/{max_p}\n\n"
-                f"أرسل رابط منتج جديد لإضافته 🔗",
+    # ─── /report ──────────────────────────────────────
+    async def cmd_report(update: Update, context):
+        if context.args:
+            report_text = " ".join(context.args)
+            u = update.effective_user
+            save_report(u.id, report_text)
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"📬 *بلاغ جديد*\n\n👤 {u.first_name} (`{u.id}`)\n💬 {report_text}",
                 parse_mode="Markdown",
+                reply_markup={"inline_keyboard": [
+                    [{"text": "💬 رد على العميل", "callback_data": f"reply_{u.id}"}]
+                ]},
             )
-        else:
-            await query.edit_message_text("⚠️ المنتج غير موجود.")
-        return
-
-    # تفعيل الأدمن
-    if data.startswith("adm_ok_"):
-        if u.id != ADMIN_ID:
+            await update.message.reply_text("✅ تم إرسال بلاغك. شكرًا!")
             return
-        parts = data.replace("adm_ok_", "").split("_")
-        plan_key = parts[0]
-        target_uid = int(parts[1])
-        ensure_user(target_uid)
-        msg = activate_plan(target_uid, plan_key)
-        await query.edit_message_text(
-            f"✅ تم تفعيل {PLANS[plan_key]['name_short']} لـ `{target_uid}`",
-            parse_mode="Markdown",
+
+        user_states[update.effective_user.id] = {"state": "waiting_report"}
+        await update.message.reply_text(
+            "📝 اكتب مشكلتك أو اقتراحك:",
+            reply_markup={"inline_keyboard": [[{"text": "⬅️ إلغاء", "callback_data": "cancel_action"}]]},
         )
-        try:
-            await context.bot.send_message(chat_id=target_uid, text=msg, parse_mode="Markdown")
-        except Exception:
-            pass
-        return
 
-    # رفض الأدمن
-    if data.startswith("adm_no_"):
-        if u.id != ADMIN_ID:
+    # ─── /reply (أدمن) — رد على عميل ─────────────────
+    async def cmd_reply(update: Update, context):
+        """الأدمن يرد على عميل: /reply 123456 رسالة الرد"""
+        if update.effective_user.id != ADMIN_ID:
             return
-        target_uid = int(data.replace("adm_no_", ""))
-        await query.edit_message_text(f"❌ تم رفض طلب `{target_uid}`", parse_mode="Markdown")
+        if len(context.args) < 2:
+            await update.message.reply_text("استخدم: /reply [user_id] [الرسالة]")
+            return
+
+        target_uid = context.args[0]
+        reply_text = " ".join(context.args[1:])
+
         try:
             await context.bot.send_message(
-                chat_id=target_uid,
-                text="❌ لم نتمكن من التحقق من الدفع.\nتأكد من رقم الطلب عبر /report",
-            )
-        except Exception:
-            pass
-        return
-
-    # رد الأدمن على بلاغ
-    if data.startswith("reply_"):
-        if u.id != ADMIN_ID:
-            return
-        target_uid = int(data.replace("reply_", ""))
-        user_states[u.id] = {"state": "waiting_admin_reply", "target_uid": target_uid}
-        await query.edit_message_text(
-            f"💬 اكتب ردك على المستخدم `{target_uid}` وأرسله:",
-            parse_mode="Markdown",
-        )
-        return
-
-    # خيارات التنبيه
-    if data == "alert_any":
-        state = user_states.get(u.id, {})
-        if state.get("state") == "choosing_alert":
-            user_data = get_user(u.id)
-            products = get_user_products(u.id)
-            max_p = user_data["max_products"] if user_data else 1
-
-            if len(products) >= max_p:
-                await query.edit_message_text(
-                    f"⚠️ وصلت الحد ({max_p} منتج).\nترقّي باقتك /start"
-                )
-                user_states.pop(u.id, None)
-                return
-
-            pid = add_product(u.id, state["url"], state["product_info"], None)
-            user_states.pop(u.id, None)
-
-            info = state["product_info"]
-            cur = info.get("currency", "ر.س")
-            await query.edit_message_text(
-                f"✅ تمت إضافة المنتج!\n\n"
-                f"📦 {info['title'][:60]}\n"
-                f"💰 السعر: {info['price']} {cur}\n"
-                f"🔔 تنبيه: لما ينزل أي مبلغ\n"
-                f"🏪 {info['store']}\n\n"
-                f"📊 المنتجات: {len(products)+1}/{max_p}",
-                parse_mode="Markdown",
-            )
-        return
-
-    if data == "alert_target":
-        state = user_states.get(u.id, {})
-        if state.get("state") == "choosing_alert":
-            user_states[u.id]["state"] = "waiting_target_price"
-            cur = state["product_info"].get("currency", "ر.س")
-            await query.edit_message_text(
-                f"💰 السعر الحالي: {state['product_info']['price']} {cur}\n\n"
-                "🎯 أرسل السعر المستهدف:"
-            )
-        return
-
-# ─── الرسائل ──────────────────────────────────────
-async def handle_message(update: Update, context):
-    u = update.effective_user
-    text = update.message.text.strip()
-    ensure_user(u.id, u.first_name, u.username or "")
-
-    state = user_states.get(u.id, {})
-    current_state = state.get("state", "")
-
-    # ── رد الأدمن على عميل ──
-    if current_state == "waiting_admin_reply" and u.id == ADMIN_ID:
-        target_uid = state["target_uid"]
-        user_states.pop(u.id, None)
-        try:
-            await context.bot.send_message(
-                chat_id=target_uid,
-                text=f"💬 *رد من فريق نبّهني:*\n\n{text}",
+                chat_id=int(target_uid),
+                text=f"💬 *رد من فريق نبّهني:*\n\n{reply_text}",
                 parse_mode="Markdown",
             )
             await update.message.reply_text(f"✅ تم إرسال الرد لـ `{target_uid}`", parse_mode="Markdown")
         except Exception as e:
             await update.message.reply_text(f"❌ فشل الإرسال: {e}")
-        return
 
-    # ── رقم الطلب ──
-    if current_state == "waiting_order":
-        plan_key = state.get("plan_key", "basic")
-        plan = PLANS[plan_key]
-        save_order(u.id, plan_key, text)
-        user_states.pop(u.id, None)
-
+    # ─── /help ────────────────────────────────────────
+    async def cmd_help(update: Update, context):
         await update.message.reply_text(
-            f"✅ تم استلام رقم الطلب: *{text}*\n\n"
-            f"الباقة: {plan['name']}\n\n⏳ جاري التحقق... 🚀",
+            "📖 *مساعدة نبّهني*\n\n"
+            "🔗 *لإضافة منتج:* أرسل رابطه مباشرة\n\n"
+            "📋 *الأوامر:*\n"
+            "/start — اختيار باقة\n"
+            "/list — منتجاتك المراقبة\n"
+            "/plan — تفاصيل باقتك\n"
+            "/remove — حذف منتج\n"
+            "/report — بلّغ عن مشكلة\n\n"
+            "🏪 ندعم أغلب المتاجر الإلكترونية.\n"
+            "جرّب أرسل رابط من أي متجر!\n\n"
+            "💡 البوت يفحص الأسعار كل ٥ دقائق وينبّهك فورًا.",
             parse_mode="Markdown",
         )
 
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                f"🔔 *طلب جديد!*\n\n"
-                f"👤 {u.first_name} (`{u.id}`)\n"
-                f"📦 {plan['name']}\n"
-                f"🧾 رقم الطلب: `{text}`\n"
-                f"🕐 {datetime.now().strftime('%Y/%m/%d %H:%M')}"
-            ),
-            parse_mode="Markdown",
-            reply_markup={"inline_keyboard": [
-                [{"text": f"✅ فعّل {plan['name_short']}", "callback_data": f"adm_ok_{plan_key}_{u.id}"}],
-                [{"text": "❌ رفض", "callback_data": f"adm_no_{u.id}"}],
-            ]},
-        )
-        return
-
-    # ── البلاغ ──
-    if current_state == "waiting_report":
-        user_states.pop(u.id, None)
-        save_report(u.id, text)
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"📬 *بلاغ جديد*\n\n👤 {u.first_name} (`{u.id}`)\n💬 {text}",
-            parse_mode="Markdown",
-            reply_markup={"inline_keyboard": [
-                [{"text": "💬 رد على العميل", "callback_data": f"reply_{u.id}"}]
-            ]},
-        )
-        await update.message.reply_text("✅ تم إرسال بلاغك. شكرًا!")
-        return
-
-    # ── السعر المستهدف ──
-    if current_state == "waiting_target_price":
-        try:
-            target = float(text.replace(",", "").replace("٫", "."))
-        except ValueError:
-            await update.message.reply_text("⚠️ أرسل رقم صحيح.")
+    # ─── /stats و /users (أدمن) ───────────────────────
+    async def cmd_stats(update: Update, context):
+        if update.effective_user.id != ADMIN_ID:
             return
+        await update.message.reply_text(get_admin_stats(), parse_mode="Markdown")
 
-        user_data = get_user(u.id)
-        products = get_user_products(u.id)
-        max_p = user_data["max_products"] if user_data else 1
+    async def cmd_users(update: Update, context):
+        if update.effective_user.id != ADMIN_ID:
+            return
+        await update.message.reply_text(get_admin_users_detail(), parse_mode="Markdown")
 
-        if len(products) >= max_p:
-            await update.message.reply_text(f"⚠️ وصلت الحد ({max_p} منتج). ترقّي /start")
+    # ─── الأزرار ──────────────────────────────────────
+    async def handle_callback(update: Update, context):
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        u = query.from_user
+        ensure_user(u.id, u.first_name, u.username or "")
+
+        # إلغاء
+        if data == "cancel_action":
             user_states.pop(u.id, None)
+            await query.edit_message_text("✅ تم الإلغاء.")
             return
 
-        info = state["product_info"]
-        add_product(u.id, state["url"], info, target)
-        user_states.pop(u.id, None)
-
-        cur = info.get("currency", "ر.س")
-        await update.message.reply_text(
-            f"✅ تمت إضافة المنتج!\n\n"
-            f"📦 {info['title'][:60]}\n"
-            f"💰 السعر: {info['price']} {cur}\n"
-            f"🎯 تنبيه عند: {target} {cur}\n"
-            f"🏪 {info['store']}\n\n"
-            f"📊 المنتجات: {len(products)+1}/{max_p}",
-            parse_mode="Markdown",
-        )
-        return
-
-    # ── رابط منتج ──
-    url_match = re.search(r"https?://\S+", text)
-    if url_match:
-        url = url_match.group()
-
-        # تنظيف الرابط من tracking parameters
-        url = clean_tracking_url(url)
-
-        # التحقق من الباقة
-        user_data = get_user(u.id)
-        if not user_data or not user_data.get("plan"):
-            await update.message.reply_text(
-                "⚠️ ليس لديك باقة.\n\nاختر باقة أولاً:",
+        # القائمة
+        if data == "back_to_menu":
+            user_states.pop(u.id, None)
+            await query.edit_message_text(
+                "👋 أهلاً فيك في *نبّهني*!\n\n"
+                "🔔 نتابع لك أسعار المنتجات وننبّهك أول ما ينزل السعر.\n\n"
+                "اختر الباقة:",
+                parse_mode="Markdown",
                 reply_markup=build_main_menu_keyboard(),
             )
             return
 
-        if user_data.get("expires_at"):
-            expiry = datetime.fromisoformat(user_data["expires_at"])
-            if expiry < datetime.now():
+        # المجانية
+        if data == "plan_free":
+            user_data = get_user(u.id)
+            if user_data and user_data.get("used_free_trial"):
+                await query.edit_message_text(
+                    "⚠️ سبق لك استخدام التجربة المجانية.\n\nاختر باقة مدفوعة:",
+                    reply_markup=build_upgrade_keyboard(),
+                )
+                return
+            msg = activate_plan(u.id, "free")
+            await query.edit_message_text(msg, parse_mode="Markdown")
+            return
+
+        # المدفوعة
+        if data in ("plan_basic", "plan_pro"):
+            plan_key = data.replace("plan_", "")
+            plan = PLANS[plan_key]
+            await query.edit_message_text(
+                f"{plan['description']}\n{'─' * 25}\n\n"
+                f"1️⃣ اضغط الزر أدناه للدفع\n"
+                f"2️⃣ بعد الدفع اضغط \"✅ دفعت\" وأرسل رقم الطلب",
+                parse_mode="Markdown",
+                reply_markup=build_paid_plan_keyboard(plan_key),
+            )
+            return
+
+        # تأكيد الدفع
+        if data.startswith("paid_"):
+            plan_key = data.replace("paid_", "")
+            user_states[u.id] = {"state": "waiting_order", "plan_key": plan_key}
+            await query.edit_message_text(
+                "📝 أرسل رقم الطلب من سلة:\n\n_(تلقاه في إيميل تأكيد الطلب)_",
+                parse_mode="Markdown",
+                reply_markup={"inline_keyboard": [[{"text": "⬅️ رجوع", "callback_data": f"plan_{plan_key}"}]]},
+            )
+            return
+
+        # حذف منتج
+        if data.startswith("del_"):
+            pid = int(data.replace("del_", ""))
+            conn = get_db()
+            prod = conn.execute("SELECT title FROM products WHERE id = ? AND user_id = ?", (pid, u.id)).fetchone()
+            conn.close()
+
+            if prod:
+                delete_product(pid)
+                remaining = len(get_user_products(u.id))
+                user_data = get_user(u.id)
+                max_p = user_data["max_products"] if user_data else 1
+
+                await query.edit_message_text(
+                    f"🗑 تم حذف: *{prod['title'][:45]}*\n\n"
+                    f"📦 المتبقية: {remaining}/{max_p}\n\n"
+                    f"أرسل رابط منتج جديد لإضافته 🔗",
+                    parse_mode="Markdown",
+                )
+            else:
+                await query.edit_message_text("⚠️ المنتج غير موجود.")
+            return
+
+        # تفعيل الأدمن
+        if data.startswith("adm_ok_"):
+            if u.id != ADMIN_ID:
+                return
+            parts = data.replace("adm_ok_", "").split("_")
+            plan_key = parts[0]
+            target_uid = int(parts[1])
+            ensure_user(target_uid)
+            msg = activate_plan(target_uid, plan_key)
+            await query.edit_message_text(
+                f"✅ تم تفعيل {PLANS[plan_key]['name_short']} لـ `{target_uid}`",
+                parse_mode="Markdown",
+            )
+            try:
+                await context.bot.send_message(chat_id=target_uid, text=msg, parse_mode="Markdown")
+            except Exception:
+                pass
+            return
+
+        # رفض الأدمن
+        if data.startswith("adm_no_"):
+            if u.id != ADMIN_ID:
+                return
+            target_uid = int(data.replace("adm_no_", ""))
+            await query.edit_message_text(f"❌ تم رفض طلب `{target_uid}`", parse_mode="Markdown")
+            try:
+                await context.bot.send_message(
+                    chat_id=target_uid,
+                    text="❌ لم نتمكن من التحقق من الدفع.\nتأكد من رقم الطلب عبر /report",
+                )
+            except Exception:
+                pass
+            return
+
+        # رد الأدمن على بلاغ
+        if data.startswith("reply_"):
+            if u.id != ADMIN_ID:
+                return
+            target_uid = int(data.replace("reply_", ""))
+            user_states[u.id] = {"state": "waiting_admin_reply", "target_uid": target_uid}
+            await query.edit_message_text(
+                f"💬 اكتب ردك على المستخدم `{target_uid}` وأرسله:",
+                parse_mode="Markdown",
+            )
+            return
+
+        # خيارات التنبيه
+        if data == "alert_any":
+            state = user_states.get(u.id, {})
+            if state.get("state") == "choosing_alert":
+                user_data = get_user(u.id)
+                products = get_user_products(u.id)
+                max_p = user_data["max_products"] if user_data else 1
+
+                if len(products) >= max_p:
+                    await query.edit_message_text(
+                        f"⚠️ وصلت الحد ({max_p} منتج).\nترقّي باقتك /start"
+                    )
+                    user_states.pop(u.id, None)
+                    return
+
+                pid = add_product(u.id, state["url"], state["product_info"], None)
+                user_states.pop(u.id, None)
+
+                info = state["product_info"]
+                cur = info.get("currency", "ر.س")
+                await query.edit_message_text(
+                    f"✅ تمت إضافة المنتج!\n\n"
+                    f"📦 {info['title'][:60]}\n"
+                    f"💰 السعر: {info['price']} {cur}\n"
+                    f"🔔 تنبيه: لما ينزل أي مبلغ\n"
+                    f"🏪 {info['store']}\n\n"
+                    f"📊 المنتجات: {len(products)+1}/{max_p}",
+                    parse_mode="Markdown",
+                )
+            return
+
+        if data == "alert_target":
+            state = user_states.get(u.id, {})
+            if state.get("state") == "choosing_alert":
+                user_states[u.id]["state"] = "waiting_target_price"
+                cur = state["product_info"].get("currency", "ر.س")
+                await query.edit_message_text(
+                    f"💰 السعر الحالي: {state['product_info']['price']} {cur}\n\n"
+                    "🎯 أرسل السعر المستهدف:"
+                )
+            return
+
+    # ─── الرسائل ──────────────────────────────────────
+    async def handle_message(update: Update, context):
+        u = update.effective_user
+        text = update.message.text.strip()
+        ensure_user(u.id, u.first_name, u.username or "")
+
+        state = user_states.get(u.id, {})
+        current_state = state.get("state", "")
+
+        # ── رد الأدمن على عميل ──
+        if current_state == "waiting_admin_reply" and u.id == ADMIN_ID:
+            target_uid = state["target_uid"]
+            user_states.pop(u.id, None)
+            try:
+                await context.bot.send_message(
+                    chat_id=target_uid,
+                    text=f"💬 *رد من فريق نبّهني:*\n\n{text}",
+                    parse_mode="Markdown",
+                )
+                await update.message.reply_text(f"✅ تم إرسال الرد لـ `{target_uid}`", parse_mode="Markdown")
+            except Exception as e:
+                await update.message.reply_text(f"❌ فشل الإرسال: {e}")
+            return
+
+        # ── رقم الطلب ──
+        if current_state == "waiting_order":
+            plan_key = state.get("plan_key", "basic")
+            plan = PLANS[plan_key]
+            save_order(u.id, plan_key, text)
+            user_states.pop(u.id, None)
+
+            await update.message.reply_text(
+                f"✅ تم استلام رقم الطلب: *{text}*\n\n"
+                f"الباقة: {plan['name']}\n\n⏳ جاري التحقق... 🚀",
+                parse_mode="Markdown",
+            )
+
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"🔔 *طلب جديد!*\n\n"
+                    f"👤 {u.first_name} (`{u.id}`)\n"
+                    f"📦 {plan['name']}\n"
+                    f"🧾 رقم الطلب: `{text}`\n"
+                    f"🕐 {datetime.now().strftime('%Y/%m/%d %H:%M')}"
+                ),
+                parse_mode="Markdown",
+                reply_markup={"inline_keyboard": [
+                    [{"text": f"✅ فعّل {plan['name_short']}", "callback_data": f"adm_ok_{plan_key}_{u.id}"}],
+                    [{"text": "❌ رفض", "callback_data": f"adm_no_{u.id}"}],
+                ]},
+            )
+            return
+
+        # ── البلاغ ──
+        if current_state == "waiting_report":
+            user_states.pop(u.id, None)
+            save_report(u.id, text)
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"📬 *بلاغ جديد*\n\n👤 {u.first_name} (`{u.id}`)\n💬 {text}",
+                parse_mode="Markdown",
+                reply_markup={"inline_keyboard": [
+                    [{"text": "💬 رد على العميل", "callback_data": f"reply_{u.id}"}]
+                ]},
+            )
+            await update.message.reply_text("✅ تم إرسال بلاغك. شكرًا!")
+            return
+
+        # ── السعر المستهدف ──
+        if current_state == "waiting_target_price":
+            try:
+                target = float(text.replace(",", "").replace("٫", "."))
+            except ValueError:
+                await update.message.reply_text("⚠️ أرسل رقم صحيح.")
+                return
+
+            user_data = get_user(u.id)
+            products = get_user_products(u.id)
+            max_p = user_data["max_products"] if user_data else 1
+
+            if len(products) >= max_p:
+                await update.message.reply_text(f"⚠️ وصلت الحد ({max_p} منتج). ترقّي /start")
+                user_states.pop(u.id, None)
+                return
+
+            info = state["product_info"]
+            add_product(u.id, state["url"], info, target)
+            user_states.pop(u.id, None)
+
+            cur = info.get("currency", "ر.س")
+            await update.message.reply_text(
+                f"✅ تمت إضافة المنتج!\n\n"
+                f"📦 {info['title'][:60]}\n"
+                f"💰 السعر: {info['price']} {cur}\n"
+                f"🎯 تنبيه عند: {target} {cur}\n"
+                f"🏪 {info['store']}\n\n"
+                f"📊 المنتجات: {len(products)+1}/{max_p}",
+                parse_mode="Markdown",
+            )
+            return
+
+        # ── رابط منتج ──
+        url_match = re.search(r"https?://\S+", text)
+        if url_match:
+            url = url_match.group()
+
+            # تنظيف الرابط من tracking parameters
+            url = clean_tracking_url(url)
+
+            # التحقق من الباقة
+            user_data = get_user(u.id)
+            if not user_data or not user_data.get("plan"):
                 await update.message.reply_text(
-                    "⚠️ باقتك منتهية.\n\nجدّد باقتك:",
+                    "⚠️ ليس لديك باقة.\n\nاختر باقة أولاً:",
                     reply_markup=build_main_menu_keyboard(),
                 )
                 return
 
-        store_name = detect_store_name(url)
-        await update.message.reply_text(f"🔍 جاري جلب المنتج من {store_name}...")
+            if user_data.get("expires_at"):
+                expiry = datetime.fromisoformat(user_data["expires_at"])
+                if expiry < datetime.now():
+                    await update.message.reply_text(
+                        "⚠️ باقتك منتهية.\n\nجدّد باقتك:",
+                        reply_markup=build_main_menu_keyboard(),
+                    )
+                    return
 
-        product_info = await fetch_price(url)
-        if not product_info:
+            store_name = detect_store_name(url)
+            await update.message.reply_text(f"🔍 جاري جلب المنتج من {store_name}...")
+
+            product_info = await fetch_price(url)
+            if not product_info:
+                await update.message.reply_text(
+                    f"⚠️ ما قدرت أجلب السعر.\n\n"
+                    "الأسباب المحتملة:\n"
+                    "• الرابط غير صحيح أو المنتج غير متوفر\n"
+                    "• المتجر يحتاج تسجيل دخول\n"
+                    "• المتجر يحجب الطلبات الآلية\n\n"
+                    "💡 جرّب أرسل رابط مباشر لصفحة المنتج."
+                )
+                return
+
+            user_states[u.id] = {
+                "state": "choosing_alert",
+                "url": url,
+                "product_info": product_info,
+            }
+
+            cur = product_info.get("currency", "ر.س")
             await update.message.reply_text(
-                f"⚠️ ما قدرت أجلب السعر.\n\n"
-                "الأسباب المحتملة:\n"
-                "• الرابط غير صحيح أو المنتج غير متوفر\n"
-                "• المتجر يحتاج تسجيل دخول\n"
-                "• المتجر يحجب الطلبات الآلية\n\n"
-                "💡 جرّب أرسل رابط مباشر لصفحة المنتج."
+                f"📦 *{product_info['title'][:60]}*\n"
+                f"💰 السعر: {product_info['price']} {cur}\n"
+                f"🏪 {product_info['store']}\n\n"
+                f"كيف تبغى التنبيه؟",
+                parse_mode="Markdown",
+                reply_markup={"inline_keyboard": [
+                    [{"text": "🔔 نبّهني لما ينزل أي مبلغ", "callback_data": "alert_any"}],
+                    [{"text": "🎯 نبّهني لما يوصل سعر معيّن", "callback_data": "alert_target"}],
+                ]},
             )
             return
 
-        user_states[u.id] = {
-            "state": "choosing_alert",
-            "url": url,
-            "product_info": product_info,
-        }
-
-        cur = product_info.get("currency", "ر.س")
+        # رسالة عادية
         await update.message.reply_text(
-            f"📦 *{product_info['title'][:60]}*\n"
-            f"💰 السعر: {product_info['price']} {cur}\n"
-            f"🏪 {product_info['store']}\n\n"
-            f"كيف تبغى التنبيه؟",
-            parse_mode="Markdown",
-            reply_markup={"inline_keyboard": [
-                [{"text": "🔔 نبّهني لما ينزل أي مبلغ", "callback_data": "alert_any"}],
-                [{"text": "🎯 نبّهني لما يوصل سعر معيّن", "callback_data": "alert_target"}],
-            ]},
+            "أرسل رابط المنتج اللي تبغى تتبّعه 🔗\nأو /help للمساعدة."
         )
-        return
 
-    # رسالة عادية
-    await update.message.reply_text(
-        "أرسل رابط المنتج اللي تبغى تتبّعه 🔗\nأو /help للمساعدة."
-    )
+    # ─── فحص دوري ─────────────────────────────────────
+    async def price_check_free_job(context):
+        await check_prices_free(context.bot)
 
-# ─── فحص دوري ─────────────────────────────────────
-async def price_check_free_job(context):
-    await check_prices_free(context.bot)
+    async def price_check_scraperapi_job(context):
+        await check_prices_scraperapi(context.bot)
 
-async def price_check_scraperapi_job(context):
-    await check_prices_scraperapi(context.bot)
+    # ─── القائمة السفلية ──────────────────────────────
+    async def post_init(application):
+        await application.bot.set_my_commands([
+            BotCommand("start", "ابدأ واختر باقتك"),
+            BotCommand("list", "عرض منتجاتك المراقبة"),
+            BotCommand("plan", "عرض باقتك الحالية"),
+            BotCommand("remove", "حذف منتج من المراقبة"),
+            BotCommand("report", "بلّغ عن مشكلة"),
+            BotCommand("help", "المساعدة"),
+        ])
 
-# ─── القائمة السفلية ──────────────────────────────
-async def post_init(application):
-    await application.bot.set_my_commands([
-        BotCommand("start", "ابدأ واختر باقتك"),
-        BotCommand("list", "عرض منتجاتك المراقبة"),
-        BotCommand("plan", "عرض باقتك الحالية"),
-        BotCommand("remove", "حذف منتج من المراقبة"),
-        BotCommand("report", "بلّغ عن مشكلة"),
-        BotCommand("help", "المساعدة"),
-    ])
+    app.post_init = post_init
 
-app.post_init = post_init
+    # ─── التسجيل ──────────────────────────────────────
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("list", cmd_list))
+    app.add_handler(CommandHandler("plan", cmd_plan))
+    app.add_handler(CommandHandler("remove", cmd_remove))
+    app.add_handler(CommandHandler("report", cmd_report))
+    app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("users", cmd_users))
+    app.add_handler(CommandHandler("reply", cmd_reply))
 
-# ─── التسجيل ──────────────────────────────────────
-app.add_handler(CommandHandler("start", cmd_start))
-app.add_handler(CommandHandler("list", cmd_list))
-app.add_handler(CommandHandler("plan", cmd_plan))
-app.add_handler(CommandHandler("remove", cmd_remove))
-app.add_handler(CommandHandler("report", cmd_report))
-app.add_handler(CommandHandler("help", cmd_help))
-app.add_handler(CommandHandler("stats", cmd_stats))
-app.add_handler(CommandHandler("users", cmd_users))
-app.add_handler(CommandHandler("reply", cmd_reply))
+    app.add_handler(CallbackQueryHandler(handle_callback))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-app.add_handler(CallbackQueryHandler(handle_callback))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    # متاجر مجانية: كل ساعة (3600 ثانية)
+    app.job_queue.run_repeating(price_check_free_job, interval=3600, first=60)
+    # متاجر ScraperAPI: كل يوم (86400 ثانية)
+    app.job_queue.run_repeating(price_check_scraperapi_job, interval=86400, first=300)
 
-# متاجر مجانية: كل ساعة (3600 ثانية)
-app.job_queue.run_repeating(price_check_free_job, interval=3600, first=60)
-# متاجر ScraperAPI: كل يوم (86400 ثانية)
-app.job_queue.run_repeating(price_check_scraperapi_job, interval=86400, first=300)
+    logging.info("🚀 نبّهني بوت شغّال!")
+    app.run_polling(drop_pending_updates=True)
 
-logging.info("🚀 نبّهني بوت شغّال!")
-app.run_polling(drop_pending_updates=True)
-```
-
-if **name** == “**main**”:
-main()
+if __name__ == "__main__":
+    main()
