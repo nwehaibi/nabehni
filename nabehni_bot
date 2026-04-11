@@ -568,7 +568,6 @@ async def fetch_price_noon_api(url: str) -> Optional[dict]:
     except Exception:
         pass
 
- claude/code-review-NiECA
     return None
 
 async def _expand_short_url(url: str) -> str:
@@ -619,37 +618,6 @@ async def _expand_short_url(url: str) -> str:
                     return f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
         except Exception:
             pass
-
-# شي إن: تحويل رابط التطبيق (sharejump)
-if "sharejump" in url or "api-shein" in url:
-    try:
-        from playwright.async_api import async_playwright
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox"],
-                proxy={
-                    "server": "",
-                    "username": "",
-                    "password": "",
-                },
-            )
-            ctx = await browser.new_context(ignore_https_errors=True)
-            page = await ctx.new_page()
-            try:
-                await page.goto(url, timeout=20000)
-            except:
-                pass
-            await page.wait_for_timeout(5000)
-            final = page.url
-            await browser.close()
-            gid = re.search(r"-p-(\d+)", final)
-            logging.info(f"Shein redirect to: {final[:100]}")
-            if gid:
-                return f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
-    except:
-        pass
- main
 
     return url
 
