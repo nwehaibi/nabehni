@@ -612,9 +612,9 @@ if "sharejump" in url or "api-shein" in url:
                 headless=True,
                 args=["--no-sandbox"],
                 proxy={
-                    "server": "http://geo.iproyal.com:12321",
-                    "username": "DrncTtwog8wtL5JC",
-                    "password": "RzwbrVcR46tMocu5_country-sa",
+                    "server": "",
+                    "username": "",
+                    "password": "",
                 },
             )
             ctx = await browser.new_context(ignore_https_errors=True)
