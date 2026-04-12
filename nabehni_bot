@@ -415,6 +415,9 @@ def clean_tracking_url(url: str) -> str:
     # نون: نبقي بس الرابط بدون أي parameters
     if "noon.com" in url:
         return url.split("?")[0]
+    # علي إكسبرس: رقم المنتج في المسار، نحذف كل الـ parameters
+    if "aliexpress.com" in url:
+        return url.split("?")[0].split("#")[0]
     # شي إن: نبقي main_attr فقط
     if "shein.com" in url and "sharejump" not in url:
         import re as r2
@@ -2041,6 +2044,7 @@ def main():
                 return
 
             check_url = check_url.group()
+            check_url = clean_tracking_url(check_url)
             store_name = detect_store_name(check_url)
             await update.message.reply_text(f"🔍 جاري التحقق من {store_name}...")
 
