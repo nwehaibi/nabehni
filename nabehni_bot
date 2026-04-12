@@ -706,6 +706,14 @@ async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
     url = await _expand_short_url(url)
     store_name = detect_store_name(url)
 
+    # ── علي إكسبرس: نحول الرابط للنسخة العربية (ريال سعودي) ──
+    if "aliexpress.com" in url.lower():
+        from urllib.parse import urlparse, urlunparse
+        parsed = urlparse(url)
+        if parsed.netloc and "ar.aliexpress.com" not in parsed.netloc.lower():
+            new_host = parsed.netloc.lower().replace("www.aliexpress.com", "ar.aliexpress.com").replace("aliexpress.com", "ar.aliexpress.com")
+            url = urlunparse(parsed._replace(netloc=new_host))
+
     # ── نون: نجرب API الداخلي أولاً (مجاني وأسرع) ──
     if "noon.com" in url.lower():
         result = await fetch_price_noon_api(url)
@@ -888,7 +896,11 @@ async def _fetch_price_proxy(url: str, store_name: str) -> Optional[dict]:
         "Accept-Language": "ar-SA,ar;q=0.9,en;q=0.7",
     }
     try:
-        async with aiohttp.ClientSession() as session:
+        cookies = {}
+        if "aliexpress.com" in url.lower():
+            cookies = {"aep_usuc_f": "site=ara&c_tp=SAR&region=SA&b_locale=ar_SA", "intl_locale": "ar_SA"}
+
+        async with aiohttp.ClientSession(cookies=cookies) as session:
             async with session.get(url, proxy=IPROYAL_PROXY, headers=headers, timeout=aiohttp.ClientTimeout(total=20), ssl=False) as resp:
                 if resp.status != 200:
                     return None
@@ -936,8 +948,12 @@ async def _fetch_price_aiohttp(url: str, store_name: str) -> Optional[dict]:
     }
 
     try:
+        cookies = {}
+        if "aliexpress.com" in url.lower():
+            cookies = {"aep_usuc_f": "site=ara&c_tp=SAR&region=SA&b_locale=ar_SA", "intl_locale": "ar_SA"}
+
         connector = aiohttp.TCPConnector(ssl=False)
-        async with aiohttp.ClientSession(connector=connector) as session:
+        async with aiohttp.ClientSession(connector=connector, cookies=cookies) as session:
             async with session.get(
                 url, headers=headers,
                 timeout=aiohttp.ClientTimeout(total=20),
@@ -1059,6 +1075,13 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
 
             page = await ctx.new_page()
 
+            # علي إكسبرس: كوكيز الريال السعودي
+            if "aliexpress.com" in url.lower():
+                await ctx.add_cookies([
+                    {"name": "aep_usuc_f", "value": "site=ara&c_tp=SAR&region=SA&b_locale=ar_SA", "domain": ".aliexpress.com", "path": "/"},
+                    {"name": "intl_locale", "value": "ar_SA", "domain": ".aliexpress.com", "path": "/"},
+                ])
+
             # حظر الموارد الثقيلة
             await page.route(re.compile(r"\.(png|jpg|jpeg|gif|webp|svg|mp4|webm|woff2?|ttf|otf)$"),
                              lambda route: route.abort())
@@ -1087,26 +1110,90 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                         else title = document.title;
                     }
 
-                    // === السعر من JSON-LD ===
+                    // === العملة من JSON-LD (نستخرجها دائماً) ===
+                    let jsonldCurrency = 'SAR';
                     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
-                    let bestPrice = 0;
-
                     for (const s of scripts) {
                         try {
                             let data = JSON.parse(s.textContent);
                             let items = Array.isArray(data) ? data : [data];
-
-                            // @graph
                             for (const item of [...items]) {
                                 if (item['@graph']) items.push(...item['@graph']);
                             }
-
                             for (const item of items) {
                                 if (!item || typeof item !== 'object') continue;
+                                let offers = item.offers || item.Offers;
+                                if (offers) {
+                                    let o = Array.isArray(offers) ? offers[0] : offers;
+                                    if (o && o.priceCurrency) jsonldCurrency = o.priceCurrency;
+                                    else if (item.priceCurrency) jsonldCurrency = item.priceCurrency;
+                                }
+                                if (!title && item.name) title = item.name;
+                            }
+                        } catch(e) {}
+                    }
+                    currency = jsonldCurrency;
 
+                    // === الأولوية 1: السعر المعروض على الصفحة (يعكس الخيار المحدد) ===
+                    const priceSelectors = [
+                        '.sale-price', '.special-price', '.offer-price',
+                        '.current-price', '.price-now', '.pdp-price',
+                        '[class*="sale"] [class*="price"]',
+                        '[class*="special"] [class*="price"]',
+                        '[class*="current"] [class*="price"]',
+                        '[class*="price"]:not([class*="old"]):not([class*="was"]):not([class*="before"]):not([class*="original"]):not([class*="regular"]):not([class*="list"])',
+                        '.price', 'span.price',
+                    ];
+
+                    // نأخذ أول سعر مرئي (هو السعر المعروض للخيار المحدد)
+                    for (const sel of priceSelectors) {
+                        try {
+                            const els = document.querySelectorAll(sel);
+                            for (const el of els) {
+                                const rect = el.getBoundingClientRect();
+                                if (rect.width === 0 || rect.height === 0) continue;
+
+                                const text = el.innerText.trim();
+                                const match = text.match(/([\\d,]+\\.?\\d*)/);
+                                if (match) {
+                                    const num = parseFloat(match[1].replace(/,/g, ''));
+                                    if (num > 0 && num < 500000) {
+                                        return { title, price: num, currency };
+                                    }
+                                }
+                            }
+                        } catch(e) {}
+                    }
+
+                    // === الأولوية 2: data-price ===
+                    const dp = document.querySelector('[data-price]');
+                    if (dp) {
+                        const p = parseFloat(dp.getAttribute('data-price'));
+                        if (p > 0) return { title, price: p, currency };
+                    }
+
+                    // === الأولوية 3: meta tags ===
+                    for (const name of ['product:price:amount', 'og:price:amount']) {
+                        const el = document.querySelector(`meta[property="${name}"]`);
+                        if (el && el.content) {
+                            const p = parseFloat(el.content.replace(/,/g, ''));
+                            if (p > 0) return { title, price: p, currency };
+                        }
+                    }
+
+                    // === الأولوية 4: JSON-LD (ملاذ أخير — يجيب أقل سعر) ===
+                    let bestPrice = 0;
+                    for (const s of scripts) {
+                        try {
+                            let data = JSON.parse(s.textContent);
+                            let items = Array.isArray(data) ? data : [data];
+                            for (const item of [...items]) {
+                                if (item['@graph']) items.push(...item['@graph']);
+                            }
+                            for (const item of items) {
+                                if (!item || typeof item !== 'object') continue;
                                 let allOffers = [];
                                 let offers = item.offers || item.Offers;
-
                                 if (Array.isArray(offers)) allOffers = offers;
                                 else if (offers && typeof offers === 'object') {
                                     if (offers.offers) {
@@ -1115,7 +1202,6 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                                         allOffers = [offers];
                                     }
                                 }
-
                                 for (const offer of allOffers) {
                                     for (const key of ['sale_price', 'salePrice', 'lowPrice', 'price']) {
                                         const v = offer[key];
@@ -1133,62 +1219,8 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                             }
                         } catch(e) {}
                     }
-
                     if (bestPrice > 0) {
                         return { title, price: bestPrice, currency };
-                    }
-
-                    // === meta tags ===
-                    for (const name of ['product:price:amount', 'og:price:amount']) {
-                        const el = document.querySelector(`meta[property="${name}"]`);
-                        if (el && el.content) {
-                            const p = parseFloat(el.content.replace(/,/g, ''));
-                            if (p > 0) return { title, price: p, currency };
-                        }
-                    }
-
-                    // === data-price ===
-                    const dp = document.querySelector('[data-price]');
-                    if (dp) {
-                        const p = parseFloat(dp.getAttribute('data-price'));
-                        if (p > 0) return { title, price: p, currency };
-                    }
-
-                    // === النص المرئي — نبحث عن سعر البيع (الأصغر) ===
-                    const priceSelectors = [
-                        '.sale-price', '.special-price', '.offer-price',
-                        '.current-price', '.price-now', '.pdp-price',
-                        '[class*="sale"] [class*="price"]',
-                        '[class*="special"] [class*="price"]',
-                        '[class*="current"] [class*="price"]',
-                        '[class*="price"]:not([class*="old"]):not([class*="was"]):not([class*="before"]):not([class*="original"]):not([class*="regular"]):not([class*="list"])',
-                        '.price', 'span.price',
-                    ];
-
-                    let candidates = [];
-                    for (const sel of priceSelectors) {
-                        try {
-                            const els = document.querySelectorAll(sel);
-                            for (const el of els) {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.width === 0 || rect.height === 0) continue; // مخفي
-
-                                const text = el.innerText.trim();
-                                const match = text.match(/([\\d,]+\\.?\\d*)/);
-                                if (match) {
-                                    const num = parseFloat(match[1].replace(/,/g, ''));
-                                    if (num > 0 && num < 500000) {
-                                        candidates.push(num);
-                                    }
-                                }
-                            }
-                        } catch(e) {}
-                    }
-
-                    // نأخذ أصغر سعر (غالباً هو سعر البيع)
-                    if (candidates.length > 0) {
-                        const minPrice = Math.min(...candidates);
-                        return { title, price: minPrice, currency };
                     }
 
                     return null;
@@ -1374,6 +1406,7 @@ def build_main_menu_keyboard():
     return {
         "inline_keyboard": [
             [{"text": "🆓 جرّب مجانًا (منتج واحد)", "callback_data": "plan_free"}],
+            [{"text": "🔍 تحقق من دعم المتجر", "callback_data": "check_store"}],
             [{"text": "⭐ الأساسية — ٣ منتجات / 9 ر.س", "callback_data": "plan_basic"}],
             [{"text": "💎 برو — ١٠ منتجات / 29 ر.س", "callback_data": "plan_pro"}],
         ]
@@ -1596,10 +1629,43 @@ def main():
             "/list — منتجاتك المراقبة\n"
             "/plan — تفاصيل باقتك\n"
             "/remove — حذف منتج\n"
-            "/report — بلّغ عن مشكلة\n\n"
+            "/report — بلّغ عن مشكلة\n"
+            "/terms — سياسة الاستخدام\n\n"
             "🏪 ندعم أغلب المتاجر الإلكترونية.\n"
             "جرّب أرسل رابط من أي متجر!\n\n"
             "💡 البوت يفحص الأسعار كل ٥ دقائق وينبّهك فورًا.",
+            parse_mode="Markdown",
+        )
+
+    # ─── /terms (سياسة الاستخدام) ─────────────────────
+    async def cmd_terms(update: Update, context):
+        await update.message.reply_text(
+            "📜 *سياسة الاستخدام — نبّهني*\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "1️⃣ *وصف الخدمة*\n"
+            "نبّهني خدمة تتبّع أسعار المنتجات من المتاجر "
+            "الإلكترونية وتنبّهك عند انخفاض السعر.\n\n"
+            "2️⃣ *الباقات والدفع*\n"
+            "• الباقة المجانية: منتج واحد لمدة ٣ أشهر (مرة واحدة).\n"
+            "• الباقات المدفوعة: تُفعّل بعد التحقق من الدفع.\n"
+            "• المبالغ المدفوعة غير قابلة للاسترداد بعد تفعيل الباقة.\n\n"
+            "3️⃣ *دقة الأسعار*\n"
+            "• الأسعار تُجلب آلياً من المتاجر وقد تختلف عن السعر الفعلي.\n"
+            "• البوت لا يضمن دقة الأسعار بنسبة 100%.\n"
+            "• تحقق دائماً من السعر في المتجر قبل الشراء.\n\n"
+            "4️⃣ *الاستخدام المسؤول*\n"
+            "• استخدم الخدمة لأغراض شخصية فقط.\n"
+            "• لا تستخدم البوت بشكل مفرط أو آلي.\n"
+            "• يحق لنا إيقاف الحساب عند سوء الاستخدام.\n\n"
+            "5️⃣ *الخصوصية*\n"
+            "• نحفظ فقط معرّف حسابك واسمك والمنتجات المتتبعة.\n"
+            "• لا نشارك بياناتك مع أي طرف ثالث.\n"
+            "• يمكنك حذف بياناتك بالتواصل مع الدعم عبر /report\n\n"
+            "6️⃣ *التعديلات*\n"
+            "• يحق لنا تعديل السياسة في أي وقت.\n"
+            "• استمرارك باستخدام البوت يعني موافقتك على التعديلات.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "باستخدامك لبوت نبّهني فأنت توافق على هذه السياسة. ✅",
             parse_mode="Markdown",
         )
 
@@ -1788,6 +1854,40 @@ def main():
                 )
             return
 
+        # تحقق من دعم المتجر
+        if data == "check_store":
+            user_states[u.id] = {"state": "waiting_check_store"}
+            await query.edit_message_text(
+                "🔍 *تحقق من دعم المتجر*\n\n"
+                "أرسل رابط أي منتج من المتجر وراح نتحقق لك إذا نقدر نتابع أسعاره.",
+                parse_mode="Markdown",
+                reply_markup={"inline_keyboard": [[{"text": "⬅️ رجوع", "callback_data": "back_to_menu"}]]},
+            )
+            return
+
+        # طلب دعم متجر جديد
+        if data == "request_store_support":
+            state = user_states.get(u.id, {})
+            store_url = state.get("url", "غير محدد")
+            store_name = state.get("store_name", "غير محدد")
+            user_states.pop(u.id, None)
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"📩 *طلب دعم متجر جديد*\n\n"
+                    f"👤 {u.first_name} (`{u.id}`)\n"
+                    f"🏪 المتجر: {store_name}\n"
+                    f"🔗 الرابط: {store_url}\n"
+                    f"🕐 {datetime.now().strftime('%Y/%m/%d %H:%M')}"
+                ),
+                parse_mode="Markdown",
+            )
+            await query.edit_message_text(
+                "✅ تم إرسال طلبك!\n\n"
+                "راح نضيف دعم المتجر في أقرب وقت ونبلّغك. شكرًا لك! 🙏"
+            )
+            return
+
     # ─── الرسائل ──────────────────────────────────────
     async def handle_message(update: Update, context):
         u = update.effective_user
@@ -1890,6 +1990,47 @@ def main():
             )
             return
 
+        # ── تحقق من دعم المتجر ──
+        if current_state == "waiting_check_store":
+            check_url = re.search(r"https?://\S+", text)
+            if not check_url:
+                await update.message.reply_text("⚠️ أرسل رابط منتج صحيح يبدأ بـ https://")
+                return
+
+            check_url = check_url.group()
+            store_name = detect_store_name(check_url)
+            await update.message.reply_text(f"🔍 جاري التحقق من {store_name}...")
+
+            product_info = await fetch_price(check_url)
+            user_states.pop(u.id, None)
+
+            if product_info:
+                cur = product_info.get("currency", "ر.س")
+                await update.message.reply_text(
+                    f"✅ *المتجر مدعوم!*\n\n"
+                    f"🏪 {product_info['store']}\n"
+                    f"📦 {product_info['title'][:60]}\n"
+                    f"💰 السعر: {product_info['price']} {cur}\n\n"
+                    f"نقدر نتابع أسعار منتجاته. اختر باقة وأرسل الرابط! 🚀",
+                    parse_mode="Markdown",
+                    reply_markup=build_main_menu_keyboard(),
+                )
+            else:
+                # نحفظ الرابط في الحالة عشان نستخدمه لما يطلب الدعم
+                user_states[u.id] = {"state": "pending_store_request", "url": check_url, "store_name": store_name}
+                await update.message.reply_text(
+                    f"❌ *المتجر غير مدعوم حالياً*\n\n"
+                    f"🏪 {store_name}\n\n"
+                    f"ما قدرنا نجلب السعر من هالمتجر.\n"
+                    f"تقدر تطلب إضافة دعم المتجر وراح نعمل عليه! 👇",
+                    parse_mode="Markdown",
+                    reply_markup={"inline_keyboard": [
+                        [{"text": "📩 طلب دعم المتجر", "callback_data": "request_store_support"}],
+                        [{"text": "⬅️ رجوع للقائمة", "callback_data": "back_to_menu"}],
+                    ]},
+                )
+            return
+
         # ── رابط منتج ──
         url_match = re.search(r"https?://\S+", text)
         if url_match:
@@ -1971,6 +2112,7 @@ def main():
             BotCommand("plan", "عرض باقتك الحالية"),
             BotCommand("remove", "حذف منتج من المراقبة"),
             BotCommand("report", "بلّغ عن مشكلة"),
+            BotCommand("terms", "سياسة الاستخدام"),
             BotCommand("help", "المساعدة"),
         ])
 
@@ -1983,6 +2125,7 @@ def main():
     app.add_handler(CommandHandler("remove", cmd_remove))
     app.add_handler(CommandHandler("report", cmd_report))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("terms", cmd_terms))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("users", cmd_users))
     app.add_handler(CommandHandler("reply", cmd_reply))
