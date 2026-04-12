@@ -686,6 +686,53 @@ async def _fetch_price_scraperapi(url: str, store_name: str) -> Optional[dict]:
     except Exception as e:
         logging.error(f"ScraperAPI error for {url}: {e}")
     return None
+async def _convert_to_sar(result: dict) -> dict:
+    """تحويل السعر للريال السعودي إذا كان بعملة أخرى"""
+    cur = result.get("currency", "ر.س")
+    if cur == "ر.س":
+        return result
+
+    # أسعار الصرف الثابتة (احتياطية)
+    fallback_rates = {
+        "€": 3.95, "$": 3.75, "د.إ": 1.02,
+        "EUR": 3.95, "USD": 3.75, "AED": 1.02, "GBP": 4.70,
+        "KWD": 12.20, "BHD": 9.95, "QAR": 1.03, "OMR": 9.75,
+    }
+
+    rate = fallback_rates.get(cur)
+    if not rate:
+        return result
+
+    # نحاول نجيب سعر اليوم من API مجاني
+    try:
+        import aiohttp
+        cur_code = cur
+        if cur == "€":
+            cur_code = "EUR"
+        elif cur == "$":
+            cur_code = "USD"
+        elif cur == "د.إ":
+            cur_code = "AED"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://open.er-api.com/v6/latest/{cur_code}",
+                timeout=aiohttp.ClientTimeout(total=5), ssl=False,
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("result") == "success" and "SAR" in data.get("rates", {}):
+                        rate = data["rates"]["SAR"]
+    except Exception:
+        pass  # نستخدم السعر الاحتياطي
+
+    original_price = result["price"]
+    converted = round(original_price * rate, 2)
+    logging.info(f"Currency convert: {original_price} {cur} → {converted} ر.س (rate: {rate})")
+    result["price"] = converted
+    result["currency"] = "ر.س"
+    return result
+
 async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
     """
     جلب السعر — يدعم أي متجر
@@ -706,14 +753,6 @@ async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
     url = await _expand_short_url(url)
     store_name = detect_store_name(url)
 
-    # ── علي إكسبرس: نحول الرابط للنسخة العربية (ريال سعودي) ──
-    if "aliexpress.com" in url.lower():
-        from urllib.parse import urlparse, urlunparse
-        parsed = urlparse(url)
-        if parsed.netloc and "ar.aliexpress.com" not in parsed.netloc.lower():
-            new_host = parsed.netloc.lower().replace("www.aliexpress.com", "ar.aliexpress.com").replace("aliexpress.com", "ar.aliexpress.com")
-            url = urlunparse(parsed._replace(netloc=new_host))
-
     # ── نون: نجرب API الداخلي أولاً (مجاني وأسرع) ──
     if "noon.com" in url.lower():
         result = await fetch_price_noon_api(url)
@@ -723,38 +762,38 @@ async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
 
     # ── الخطوة 1: aiohttp مباشر (مجاني) ──
     result = await _fetch_price_aiohttp(url, store_name)
-    if result:
-        return result
 
     # ── الخطوة 2: IPRoyal proxy (مجاني) ──
-    result = await _fetch_price_proxy(url, store_name)
-    if result:
-        return result
+    if not result:
+        result = await _fetch_price_proxy(url, store_name)
 
     # ── الخطوة 3: Playwright (مجاني، ما عدا أمازون) ──
-    if "amazon." not in url:
+    if not result and "amazon." not in url:
         result = await _fetch_price_playwright(url, store_name)
-        if result:
-            return result
 
     # ── الخطوة 4: ScraperAPI مع retry (مدفوع) ──
-    for attempt in range(2):
-        result = await _fetch_price_scraperapi(url, store_name)
-        if result:
-            result["_used_scraperapi"] = True
-            return result
-        if attempt == 0:
-            logging.info(f"ScraperAPI attempt 1 failed, retrying in 3s...")
-            await asyncio.sleep(3)
+    if not result:
+        for attempt in range(2):
+            result = await _fetch_price_scraperapi(url, store_name)
+            if result:
+                result["_used_scraperapi"] = True
+                break
+            if attempt == 0:
+                logging.info(f"ScraperAPI attempt 1 failed, retrying in 3s...")
+                await asyncio.sleep(3)
 
     # ── الخطوة 5: Google Search (ملاذ أخير) ──
-    logging.info(f"Trying Google for: {url[:50]}")
-    result = await _fetch_price_google(url, store_name)
-    if result:
-        result["_used_scraperapi"] = True
-        return result
+    if not result:
+        logging.info(f"Trying Google for: {url[:50]}")
+        result = await _fetch_price_google(url, store_name)
+        if result:
+            result["_used_scraperapi"] = True
 
-    return None
+    # ── تحويل العملة للريال السعودي إذا كانت عملة أخرى ──
+    if result:
+        result = await _convert_to_sar(result)
+
+    return result
 
 def _extract_price_from_jsonld(soup_or_html, is_html=False) -> Optional[dict]:
     """استخراج السعر من JSON-LD — يرجّع أقل سعر بيع"""
@@ -896,11 +935,7 @@ async def _fetch_price_proxy(url: str, store_name: str) -> Optional[dict]:
         "Accept-Language": "ar-SA,ar;q=0.9,en;q=0.7",
     }
     try:
-        cookies = {}
-        if "aliexpress.com" in url.lower():
-            cookies = {"aep_usuc_f": "site=ara&c_tp=SAR&region=SA&b_locale=ar_SA", "intl_locale": "ar_SA"}
-
-        async with aiohttp.ClientSession(cookies=cookies) as session:
+        async with aiohttp.ClientSession() as session:
             async with session.get(url, proxy=IPROYAL_PROXY, headers=headers, timeout=aiohttp.ClientTimeout(total=20), ssl=False) as resp:
                 if resp.status != 200:
                     return None
@@ -948,12 +983,8 @@ async def _fetch_price_aiohttp(url: str, store_name: str) -> Optional[dict]:
     }
 
     try:
-        cookies = {}
-        if "aliexpress.com" in url.lower():
-            cookies = {"aep_usuc_f": "site=ara&c_tp=SAR&region=SA&b_locale=ar_SA", "intl_locale": "ar_SA"}
-
         connector = aiohttp.TCPConnector(ssl=False)
-        async with aiohttp.ClientSession(connector=connector, cookies=cookies) as session:
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.get(
                 url, headers=headers,
                 timeout=aiohttp.ClientTimeout(total=20),
@@ -1075,13 +1106,6 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
 
             page = await ctx.new_page()
 
-            # علي إكسبرس: كوكيز الريال السعودي
-            if "aliexpress.com" in url.lower():
-                await ctx.add_cookies([
-                    {"name": "aep_usuc_f", "value": "site=ara&c_tp=SAR&region=SA&b_locale=ar_SA", "domain": ".aliexpress.com", "path": "/"},
-                    {"name": "intl_locale", "value": "ar_SA", "domain": ".aliexpress.com", "path": "/"},
-                ])
-
             # حظر الموارد الثقيلة
             await page.route(re.compile(r"\.(png|jpg|jpeg|gif|webp|svg|mp4|webm|woff2?|ttf|otf)$"),
                              lambda route: route.abort())
@@ -1110,90 +1134,26 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                         else title = document.title;
                     }
 
-                    // === العملة من JSON-LD (نستخرجها دائماً) ===
-                    let jsonldCurrency = 'SAR';
+                    // === السعر من JSON-LD ===
                     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
-                    for (const s of scripts) {
-                        try {
-                            let data = JSON.parse(s.textContent);
-                            let items = Array.isArray(data) ? data : [data];
-                            for (const item of [...items]) {
-                                if (item['@graph']) items.push(...item['@graph']);
-                            }
-                            for (const item of items) {
-                                if (!item || typeof item !== 'object') continue;
-                                let offers = item.offers || item.Offers;
-                                if (offers) {
-                                    let o = Array.isArray(offers) ? offers[0] : offers;
-                                    if (o && o.priceCurrency) jsonldCurrency = o.priceCurrency;
-                                    else if (item.priceCurrency) jsonldCurrency = item.priceCurrency;
-                                }
-                                if (!title && item.name) title = item.name;
-                            }
-                        } catch(e) {}
-                    }
-                    currency = jsonldCurrency;
-
-                    // === الأولوية 1: السعر المعروض على الصفحة (يعكس الخيار المحدد) ===
-                    const priceSelectors = [
-                        '.sale-price', '.special-price', '.offer-price',
-                        '.current-price', '.price-now', '.pdp-price',
-                        '[class*="sale"] [class*="price"]',
-                        '[class*="special"] [class*="price"]',
-                        '[class*="current"] [class*="price"]',
-                        '[class*="price"]:not([class*="old"]):not([class*="was"]):not([class*="before"]):not([class*="original"]):not([class*="regular"]):not([class*="list"])',
-                        '.price', 'span.price',
-                    ];
-
-                    // نأخذ أول سعر مرئي (هو السعر المعروض للخيار المحدد)
-                    for (const sel of priceSelectors) {
-                        try {
-                            const els = document.querySelectorAll(sel);
-                            for (const el of els) {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.width === 0 || rect.height === 0) continue;
-
-                                const text = el.innerText.trim();
-                                const match = text.match(/([\\d,]+\\.?\\d*)/);
-                                if (match) {
-                                    const num = parseFloat(match[1].replace(/,/g, ''));
-                                    if (num > 0 && num < 500000) {
-                                        return { title, price: num, currency };
-                                    }
-                                }
-                            }
-                        } catch(e) {}
-                    }
-
-                    // === الأولوية 2: data-price ===
-                    const dp = document.querySelector('[data-price]');
-                    if (dp) {
-                        const p = parseFloat(dp.getAttribute('data-price'));
-                        if (p > 0) return { title, price: p, currency };
-                    }
-
-                    // === الأولوية 3: meta tags ===
-                    for (const name of ['product:price:amount', 'og:price:amount']) {
-                        const el = document.querySelector(`meta[property="${name}"]`);
-                        if (el && el.content) {
-                            const p = parseFloat(el.content.replace(/,/g, ''));
-                            if (p > 0) return { title, price: p, currency };
-                        }
-                    }
-
-                    // === الأولوية 4: JSON-LD (ملاذ أخير — يجيب أقل سعر) ===
                     let bestPrice = 0;
+
                     for (const s of scripts) {
                         try {
                             let data = JSON.parse(s.textContent);
                             let items = Array.isArray(data) ? data : [data];
+
+                            // @graph
                             for (const item of [...items]) {
                                 if (item['@graph']) items.push(...item['@graph']);
                             }
+
                             for (const item of items) {
                                 if (!item || typeof item !== 'object') continue;
+
                                 let allOffers = [];
                                 let offers = item.offers || item.Offers;
+
                                 if (Array.isArray(offers)) allOffers = offers;
                                 else if (offers && typeof offers === 'object') {
                                     if (offers.offers) {
@@ -1202,6 +1162,7 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                                         allOffers = [offers];
                                     }
                                 }
+
                                 for (const offer of allOffers) {
                                     for (const key of ['sale_price', 'salePrice', 'lowPrice', 'price']) {
                                         const v = offer[key];
@@ -1219,8 +1180,62 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                             }
                         } catch(e) {}
                     }
+
                     if (bestPrice > 0) {
                         return { title, price: bestPrice, currency };
+                    }
+
+                    // === meta tags ===
+                    for (const name of ['product:price:amount', 'og:price:amount']) {
+                        const el = document.querySelector(`meta[property="${name}"]`);
+                        if (el && el.content) {
+                            const p = parseFloat(el.content.replace(/,/g, ''));
+                            if (p > 0) return { title, price: p, currency };
+                        }
+                    }
+
+                    // === data-price ===
+                    const dp = document.querySelector('[data-price]');
+                    if (dp) {
+                        const p = parseFloat(dp.getAttribute('data-price'));
+                        if (p > 0) return { title, price: p, currency };
+                    }
+
+                    // === النص المرئي — نبحث عن سعر البيع (الأصغر) ===
+                    const priceSelectors = [
+                        '.sale-price', '.special-price', '.offer-price',
+                        '.current-price', '.price-now', '.pdp-price',
+                        '[class*="sale"] [class*="price"]',
+                        '[class*="special"] [class*="price"]',
+                        '[class*="current"] [class*="price"]',
+                        '[class*="price"]:not([class*="old"]):not([class*="was"]):not([class*="before"]):not([class*="original"]):not([class*="regular"]):not([class*="list"])',
+                        '.price', 'span.price',
+                    ];
+
+                    let candidates = [];
+                    for (const sel of priceSelectors) {
+                        try {
+                            const els = document.querySelectorAll(sel);
+                            for (const el of els) {
+                                const rect = el.getBoundingClientRect();
+                                if (rect.width === 0 || rect.height === 0) continue; // مخفي
+
+                                const text = el.innerText.trim();
+                                const match = text.match(/([\\d,]+\\.?\\d*)/);
+                                if (match) {
+                                    const num = parseFloat(match[1].replace(/,/g, ''));
+                                    if (num > 0 && num < 500000) {
+                                        candidates.push(num);
+                                    }
+                                }
+                            }
+                        } catch(e) {}
+                    }
+
+                    // نأخذ أصغر سعر (غالباً هو سعر البيع)
+                    if (candidates.length > 0) {
+                        const minPrice = Math.min(...candidates);
+                        return { title, price: minPrice, currency };
                     }
 
                     return null;
@@ -1867,9 +1882,15 @@ def main():
 
         # طلب دعم متجر جديد
         if data == "request_store_support":
-            state = user_states.get(u.id, {})
-            store_url = state.get("url", "غير محدد")
-            store_name = state.get("store_name", "غير محدد")
+            # نستخرج اسم المتجر والرابط من نص الرسالة (أضمن من user_states)
+            msg_text = query.message.text or ""
+            store_name = "غير محدد"
+            store_url = "غير محدد"
+            for line in msg_text.split("\n"):
+                if line.strip().startswith("🏪"):
+                    store_name = line.replace("🏪", "").strip()
+                elif line.strip().startswith("🔗"):
+                    store_url = line.replace("🔗", "").strip()
             user_states.pop(u.id, None)
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
@@ -1881,11 +1902,33 @@ def main():
                     f"🕐 {datetime.now().strftime('%Y/%m/%d %H:%M')}"
                 ),
                 parse_mode="Markdown",
+                reply_markup={"inline_keyboard": [
+                    [{"text": "✅ تم إضافة دعم المتجر", "callback_data": f"store_added_{u.id}"}],
+                ]},
             )
             await query.edit_message_text(
                 "✅ تم إرسال طلبك!\n\n"
                 "راح نضيف دعم المتجر في أقرب وقت ونبلّغك. شكرًا لك! 🙏"
             )
+            return
+
+        # تأكيد الأدمن إضافة دعم متجر
+        if data.startswith("store_added_"):
+            if u.id != ADMIN_ID:
+                return
+            target_uid = int(data.replace("store_added_", ""))
+            await query.edit_message_text(
+                query.message.text + "\n\n✅ تم إضافة الدعم وتم إبلاغ العميل.",
+                parse_mode="Markdown",
+            )
+            try:
+                await context.bot.send_message(
+                    chat_id=target_uid,
+                    text="🎉 *خبر سار!*\n\nالمتجر اللي طلبت دعمه أصبح مدعوم الآن!\nجرّب أرسل رابط المنتج وتابع سعره. 🚀",
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass
             return
 
     # ─── الرسائل ──────────────────────────────────────
@@ -2016,11 +2059,10 @@ def main():
                     reply_markup=build_main_menu_keyboard(),
                 )
             else:
-                # نحفظ الرابط في الحالة عشان نستخدمه لما يطلب الدعم
-                user_states[u.id] = {"state": "pending_store_request", "url": check_url, "store_name": store_name}
                 await update.message.reply_text(
                     f"❌ *المتجر غير مدعوم حالياً*\n\n"
-                    f"🏪 {store_name}\n\n"
+                    f"🏪 {store_name}\n"
+                    f"🔗 {check_url}\n\n"
                     f"ما قدرنا نجلب السعر من هالمتجر.\n"
                     f"تقدر تطلب إضافة دعم المتجر وراح نعمل عليه! 👇",
                     parse_mode="Markdown",
