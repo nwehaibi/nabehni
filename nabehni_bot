@@ -394,10 +394,12 @@ def detect_store_name(url: str) -> str:
             "ar.shein.com": "شي إن",
             "aliexpress.com": "علي إكسبرس",
             "ar.aliexpress.com": "علي إكسبرس",
+            "a.aliexpress.com": "علي إكسبرس",
             "namshi.com": "نمشي",
             "sephora.sa": "سيفورا",
             "niceonesa.com": "نايس ون",
             "stc.com.sa": "STC",
+            "samsung.com": "سامسونج",
         }
 
         for key, name in store_names.items():
@@ -585,7 +587,7 @@ async def _expand_short_url(url: str) -> str:
         "Accept-Language": "ar-SA,ar;q=0.9,en;q=0.7",
     }
 
-    # أمازون: روابط قصيرة
+    # أمازون: روابط قصيرة (aiohttp يكفي)
     if "amzn.eu" in url or "amzn.to" in url or "a.co" in url:
         try:
             async with aiohttp.ClientSession() as s:
@@ -600,79 +602,93 @@ async def _expand_short_url(url: str) -> str:
         except Exception:
             pass
 
-    # علي إكسبرس: روابط قصيرة (a.aliexpress.com, s.click.aliexpress.com)
+    # علي إكسبرس + شي إن: يحتاجون متصفح حقيقي (يرجعون 403 لـ aiohttp)
+    needs_browser = False
     if "a.aliexpress.com" in url or "s.click.aliexpress.com" in url:
-        try:
-            async with aiohttp.ClientSession() as s:
-                # أولاً: نجرب redirect بدون follow
-                async with s.get(url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=10), ssl=False, headers=headers) as r:
-                    loc = r.headers.get("Location", "")
-                    if loc and "aliexpress.com" in loc and "/item/" in loc:
-                        logging.info(f"AliExpress short → {loc[:100]}")
-                        return loc.split("?")[0]
-
-                # ثانياً: نتبع كل الـ redirects
-                async with s.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=15), ssl=False, headers=headers) as r2:
-                    final = str(r2.url)
-                    logging.info(f"AliExpress redirect → {final[:100]}")
-                    if "aliexpress.com" in final and "/item/" in final:
-                        return final.split("?")[0]
-                    # بعض الروابط توجّه لصفحة وسيطة فيها الرابط الحقيقي
-                    html = await r2.text()
-                    real_match = re.search(r'aliexpress\.com/item/(\d+)\.html', html)
-                    if real_match:
-                        return f"https://www.aliexpress.com/item/{real_match.group(1)}.html"
-        except Exception as e:
-            logging.error(f"AliExpress expand error: {e}")
-
-    # شي إن: تحويل رابط التطبيق (sharejump)
+        needs_browser = True
     if "sharejump" in url or "api-shein" in url:
-        # أولاً نجرب بـ aiohttp (أسرع)
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=15), ssl=False, headers=headers) as r:
-                    final = str(r.url)
-                    gid = re.search(r"-p-(\d+)", final)
-                    if gid:
-                        logging.info(f"Shein aiohttp → {final[:100]}")
-                        return f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
-                    # نبحث في الـ HTML عن رابط المنتج
-                    html = await r.text()
-                    gid = re.search(r'product-p-(\d+)', html) or re.search(r'"goods_id"\s*:\s*"?(\d+)', html)
-                    if gid:
-                        return f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
-        except Exception:
-            pass
+        needs_browser = True
 
-        # ثانياً: Playwright كـ fallback (أبطأ لكن أضمن)
-        try:
-            from playwright.async_api import async_playwright
-            proxy_server = os.getenv("IPROYAL_PROXY_SERVER", "")
-            launch_args = {"headless": True, "args": ["--no-sandbox"]}
-            if proxy_server:
-                launch_args["proxy"] = {
-                    "server": proxy_server,
-                    "username": os.getenv("IPROYAL_PROXY_USER", ""),
-                    "password": os.getenv("IPROYAL_PROXY_PASS", ""),
-                }
+    if needs_browser:
+        expanded = await _expand_with_playwright(url)
+        if expanded and expanded != url:
+            return expanded
 
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(**launch_args)
-                ctx = await browser.new_context(ignore_https_errors=True)
-                page = await ctx.new_page()
-                try:
-                    await page.goto(url, timeout=20000)
-                except Exception:
-                    pass
-                await page.wait_for_timeout(5000)
-                final = page.url
-                await browser.close()
+    return url
+
+
+async def _expand_with_playwright(url: str) -> Optional[str]:
+    """توسيع الروابط القصيرة بمتصفح Playwright"""
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        logging.warning("Playwright غير مثبّت — لا يمكن توسيع الروابط القصيرة")
+        return None
+
+    browser = None
+    try:
+        proxy_server = os.getenv("IPROYAL_PROXY_SERVER", "")
+        launch_args = {
+            "headless": True,
+            "args": ["--no-sandbox", "--disable-dev-shm-usage"],
+        }
+        if proxy_server:
+            launch_args["proxy"] = {
+                "server": proxy_server,
+                "username": os.getenv("IPROYAL_PROXY_USER", ""),
+                "password": os.getenv("IPROYAL_PROXY_PASS", ""),
+            }
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(**launch_args)
+            ctx = await browser.new_context(
+                user_agent="Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36",
+                ignore_https_errors=True,
+            )
+            page = await ctx.new_page()
+
+            # حظر الصور والفيديو لتسريع التحميل
+            await page.route(re.compile(r"\.(png|jpg|jpeg|gif|webp|svg|mp4|webm|woff2?|ttf|otf)$"),
+                             lambda route: route.abort())
+
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            except Exception:
+                pass  # بعض الصفحات ما تكمل التحميل بس الـ redirect يصير
+
+            await page.wait_for_timeout(5000)
+            final = page.url
+            await browser.close()
+            browser = None
+
+            logging.info(f"Playwright expand: {url[:50]} → {final[:100]}")
+
+            # علي إكسبرس: نبحث عن /item/XXXXX.html
+            if "aliexpress.com" in url:
+                if "/item/" in final:
+                    return final.split("?")[0]
+                # أحياناً الصفحة فيها redirect بـ JavaScript
+                return final
+
+            # شي إن: نبحث عن goods ID
+            if "shein" in url:
                 gid = re.search(r"-p-(\d+)", final)
-                logging.info(f"Shein Playwright → {final[:100]}")
                 if gid:
                     return f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
+                return final
+
+            return final
+
+    except Exception as e:
+        logging.error(f"Playwright expand error: {e}")
+
+    if browser:
+        try:
+            await browser.close()
         except Exception:
             pass
+
+    return None
 
     return url
 
