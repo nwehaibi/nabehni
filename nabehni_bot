@@ -414,6 +414,7 @@ def detect_store_name(url: str) -> str:
         return "متجر"
 
 def clean_tracking_url(url: str) -> str:
+    url = url.strip().strip("<>")
     # روابط قصيرة: ما نلمسها — تتحول في _expand_short_url
     if any(d in url for d in ("a.aliexpress.com", "s.click.aliexpress.com", "amzn.eu", "amzn.to", "a.co", "sharejump", "api-shein")):
         return url
@@ -944,6 +945,9 @@ async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
     """
     import aiohttp, asyncio
     from bs4 import BeautifulSoup
+
+    # تنظيف أقواس تيليقرام < > من الرابط
+    url = url.strip().strip("<>")
 
     original_url = url
     store_name = detect_store_name(url)
@@ -1933,7 +1937,7 @@ def main():
             lines.append("⚠️ IPRoyal proxy غير مفعّل")
 
         # 4. اختبار جلب سعر (إذا أرسل رابط)
-        test_url = " ".join(context.args) if context.args else ""
+        test_url = " ".join(context.args).strip("<>") if context.args else ""
         if test_url:
             lines.append(f"\n🔍 *اختبار:* `{test_url[:60]}`")
             try:
@@ -2353,7 +2357,7 @@ def main():
                 await update.message.reply_text("⚠️ أرسل رابط منتج صحيح يبدأ بـ https://")
                 return
 
-            check_url = check_url.group()
+            check_url = check_url.group().strip("<>")
             check_url = clean_tracking_url(check_url)
             store_name = detect_store_name(check_url)
             await update.message.reply_text(f"🔍 جاري التحقق من {store_name}...")
@@ -2390,7 +2394,7 @@ def main():
         # ── رابط منتج ──
         url_match = re.search(r"https?://\S+", text)
         if url_match:
-            url = url_match.group()
+            url = url_match.group().strip("<>")
 
             # تنظيف الرابط من tracking parameters
             url = clean_tracking_url(url)
