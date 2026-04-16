@@ -582,10 +582,12 @@ def _find_chromium_executable() -> Optional[str]:
     """البحث عن متصفح Chromium المثبّت في مسارات مختلفة"""
     import glob as g
     search_paths = [
-        # مسارات Playwright الشائعة
-        *sorted(g.glob("/root/.cache/ms-playwright/chromium-*/chrome-linux/chrome"), reverse=True),
-        *sorted(g.glob("/home/*/.cache/ms-playwright/chromium-*/chrome-linux/chrome"), reverse=True),
-        *sorted(g.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"), reverse=True),
+        # مسارات Playwright الشائعة (chrome-linux و chrome-linux64)
+        *sorted(g.glob("/root/.cache/ms-playwright/chromium-*/chrome-linux*/chrome"), reverse=True),
+        *sorted(g.glob("/root/.playwright/chromium-*/chrome-linux*/chrome"), reverse=True),
+        *sorted(g.glob("/home/*/.cache/ms-playwright/chromium-*/chrome-linux*/chrome"), reverse=True),
+        *sorted(g.glob("/home/*/.playwright/chromium-*/chrome-linux*/chrome"), reverse=True),
+        *sorted(g.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"), reverse=True),
         # مسارات النظام
         "/usr/bin/chromium-browser",
         "/usr/bin/chromium",
