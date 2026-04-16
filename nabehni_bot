@@ -713,7 +713,7 @@ async def _expand_url_with_curl(url: str) -> Optional[str]:
 
 
 async def _expand_with_playwright(url: str) -> Optional[str]:
-    """توسيع الروابط القصيرة بمتصفح Playwright"""
+    """توسيع الروابط القصيرة بمتصفح Playwright مع stealth واعتراض الطلبات"""
     try:
         from playwright.async_api import async_playwright
     except ImportError:
@@ -725,13 +725,37 @@ async def _expand_with_playwright(url: str) -> Optional[str]:
         launch_args = _get_playwright_launch_args()
         logging.info(f"Playwright expand launching... exe={launch_args.get('executable_path', 'default')}")
 
+        # نجمع كل الـ URLs اللي المتصفح يزورها عشان نلقط الـ redirect
+        captured_urls = []
+
         async with async_playwright() as p:
             browser = await p.chromium.launch(**launch_args)
             ctx = await browser.new_context(
-                user_agent="Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36",
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                 ignore_https_errors=True,
+                locale="ar-SA",
+                viewport={"width": 1366, "height": 768},
             )
+
+            # إخفاء أنه headless (stealth)
+            await ctx.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => false });
+                Object.defineProperty(navigator, 'languages', { get: () => ['ar-SA', 'ar', 'en-US', 'en'] });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                window.chrome = { runtime: {} };
+                // إخفاء headless
+                Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+                delete navigator.__proto__.webdriver;
+            """)
+
             page = await ctx.new_page()
+
+            # اعتراض كل الطلبات — نلتقط URLs المهمة
+            def on_request(request):
+                req_url = request.url
+                captured_urls.append(req_url)
+
+            page.on("request", on_request)
 
             # حظر الصور والفيديو لتسريع التحميل
             await page.route(re.compile(r"\.(png|jpg|jpeg|gif|webp|svg|mp4|webm|woff2?|ttf|otf)$"),
@@ -748,18 +772,36 @@ async def _expand_with_playwright(url: str) -> Optional[str]:
             browser = None
 
             logging.info(f"Playwright expand: {url[:50]} → {final[:100]}")
+            logging.info(f"Playwright captured {len(captured_urls)} URLs")
 
-            # علي إكسبرس: نبحث عن /item/XXXXX.html
+            # علي إكسبرس: نبحث عن /item/ في الـ URL النهائي أو الطلبات الملتقطة
             if "aliexpress" in url.lower():
-                if "/item/" in final:
+                # أول شيء نشيك الـ URL النهائي
+                if "/item/" in final and "about:blank" not in final:
                     return final.split("?")[0]
-                return final
+                # إذا الـ URL النهائي about:blank، نبحث في الطلبات الملتقطة
+                for cap_url in captured_urls:
+                    if "aliexpress.com" in cap_url and "/item/" in cap_url:
+                        logging.info(f"Found AliExpress item in captured URLs: {cap_url[:100]}")
+                        return cap_url.split("?")[0]
+                # نبحث عن أي redirect URL فيه aliexpress.com
+                for cap_url in captured_urls:
+                    if "aliexpress.com" in cap_url and cap_url != url and "about:blank" not in cap_url:
+                        logging.info(f"Found AliExpress URL in captured: {cap_url[:100]}")
+                        return cap_url
+                logging.warning(f"AliExpress expand failed: final={final}, captured={len(captured_urls)} URLs")
+                return None
 
-            # شي إن: نبحث عن goods ID
+            # شي إن: نبحث عن goods ID في الـ URL أو الطلبات
             if "shein" in url.lower():
-                gid = re.search(r"-p-(\d+)", final)
-                if gid:
-                    return f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
+                # نبحث في كل الأماكن عن product ID
+                all_urls = [final] + captured_urls
+                for check_url in all_urls:
+                    gid = re.search(r"-p-(\d+)", check_url)
+                    if gid:
+                        result_url = f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
+                        logging.info(f"Found Shein product ID: {gid.group(1)}")
+                        return result_url
                 return final
 
             return final
@@ -903,9 +945,14 @@ async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
     import aiohttp, asyncio
     from bs4 import BeautifulSoup
 
+    original_url = url
     store_name = detect_store_name(url)
     logging.info(f"fetch_price: original URL={url[:80]} store={store_name}")
     url = await _expand_short_url(url)
+    # حماية: إذا التوسيع رجّع URL فاسد، نرجع للأصلي
+    if not url or "about:blank" in url or not url.startswith("http"):
+        logging.warning(f"Bad expanded URL '{url}', reverting to original")
+        url = original_url
     store_name = detect_store_name(url)
     logging.info(f"fetch_price: expanded URL={url[:80]} store={store_name}")
 
@@ -949,15 +996,22 @@ async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
 
     # ── الخطوة 4: ScraperAPI مع retry (مدفوع) ──
     if not result:
-        for attempt in range(2):
-            result = await _fetch_price_scraperapi(url, store_name)
+        # نجرب الرابط الموسّع أولاً، ثم الأصلي
+        urls_to_try = [url]
+        if original_url != url:
+            urls_to_try.append(original_url)
+        for try_url in urls_to_try:
+            for attempt in range(2):
+                result = await _fetch_price_scraperapi(try_url, store_name)
+                if result:
+                    result["_used_scraperapi"] = True
+                    logging.info(f"ScraperAPI succeeded for {store_name} with {try_url[:60]}")
+                    break
+                if attempt == 0:
+                    logging.info(f"ScraperAPI attempt 1 failed for {try_url[:60]}, retrying in 3s...")
+                    await asyncio.sleep(3)
             if result:
-                result["_used_scraperapi"] = True
-                logging.info(f"ScraperAPI succeeded for {store_name}")
                 break
-            if attempt == 0:
-                logging.info(f"ScraperAPI attempt 1 failed, retrying in 3s...")
-                await asyncio.sleep(3)
 
     # ── الخطوة 5: Google Search (ملاذ أخير) ──
     if not result:
@@ -1287,10 +1341,24 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                 # بعض المتاجر ما تكمل التحميل بس المحتوى يكون موجود
                 pass
 
-            await page.wait_for_timeout(5000)  # انتظار JavaScript
+            # انتظار الصفحة تستقر (ضروري لشي إن وعلي إكسبرس)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(3000)
+
+            # إذا الصفحة حوّلت لـ captcha/challenge، ننتظر شوي ونعيد المحاولة
+            current_url = page.url
+            if "challenge" in current_url or "captcha" in current_url or "verify" in current_url:
+                logging.warning(f"Captcha detected: {current_url[:80]}, waiting...")
+                await page.wait_for_timeout(5000)
 
             # ── استخراج كل شي من الصفحة بـ JavaScript واحد ──
-            result = await page.evaluate("""
+            result = None
+            for attempt in range(2):
+                try:
+                    result = await page.evaluate("""
                 () => {
                     let title = '';
                     let price = 0;
@@ -1412,6 +1480,12 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                     return null;
                 }
             """)
+                    if result:
+                        break
+                except Exception as eval_err:
+                    logging.warning(f"Playwright evaluate attempt {attempt+1} failed: {eval_err}")
+                    if attempt == 0:
+                        await page.wait_for_timeout(3000)
 
             await browser.close()
             browser = None
