@@ -412,6 +412,9 @@ def detect_store_name(url: str) -> str:
         return "متجر"
 
 def clean_tracking_url(url: str) -> str:
+    # روابط قصيرة: ما نلمسها — تتحول في _expand_short_url
+    if any(d in url for d in ("a.aliexpress.com", "s.click.aliexpress.com", "amzn.eu", "amzn.to", "a.co", "sharejump", "api-shein")):
+        return url
     # نون: نبقي بس الرابط بدون أي parameters
     if "noon.com" in url:
         return url.split("?")[0]
@@ -577,35 +580,84 @@ async def _expand_short_url(url: str) -> str:
     """تحويل الروابط القصيرة للرابط الكامل"""
     import aiohttp
 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+        "Accept-Language": "ar-SA,ar;q=0.9,en;q=0.7",
+    }
+
     # أمازون: روابط قصيرة
     if "amzn.eu" in url or "amzn.to" in url or "a.co" in url:
         try:
             async with aiohttp.ClientSession() as s:
-                async with s.get(url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=10), ssl=False) as r:
+                async with s.get(url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=10), ssl=False, headers=headers) as r:
                     loc = r.headers.get("Location", "")
                     if loc and "amazon" in loc:
                         return loc.split("?")[0]
-                    async with s.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=10), ssl=False) as r2:
+                    async with s.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=10), ssl=False, headers=headers) as r2:
                         final = str(r2.url).split("?")[0]
                         if "amazon" in final:
                             return final
         except Exception:
             pass
 
+    # علي إكسبرس: روابط قصيرة (a.aliexpress.com, s.click.aliexpress.com)
+    if "a.aliexpress.com" in url or "s.click.aliexpress.com" in url:
+        try:
+            async with aiohttp.ClientSession() as s:
+                # أولاً: نجرب redirect بدون follow
+                async with s.get(url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=10), ssl=False, headers=headers) as r:
+                    loc = r.headers.get("Location", "")
+                    if loc and "aliexpress.com" in loc and "/item/" in loc:
+                        logging.info(f"AliExpress short → {loc[:100]}")
+                        return loc.split("?")[0]
+
+                # ثانياً: نتبع كل الـ redirects
+                async with s.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=15), ssl=False, headers=headers) as r2:
+                    final = str(r2.url)
+                    logging.info(f"AliExpress redirect → {final[:100]}")
+                    if "aliexpress.com" in final and "/item/" in final:
+                        return final.split("?")[0]
+                    # بعض الروابط توجّه لصفحة وسيطة فيها الرابط الحقيقي
+                    html = await r2.text()
+                    real_match = re.search(r'aliexpress\.com/item/(\d+)\.html', html)
+                    if real_match:
+                        return f"https://www.aliexpress.com/item/{real_match.group(1)}.html"
+        except Exception as e:
+            logging.error(f"AliExpress expand error: {e}")
+
     # شي إن: تحويل رابط التطبيق (sharejump)
     if "sharejump" in url or "api-shein" in url:
+        # أولاً نجرب بـ aiohttp (أسرع)
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=15), ssl=False, headers=headers) as r:
+                    final = str(r.url)
+                    gid = re.search(r"-p-(\d+)", final)
+                    if gid:
+                        logging.info(f"Shein aiohttp → {final[:100]}")
+                        return f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
+                    # نبحث في الـ HTML عن رابط المنتج
+                    html = await r.text()
+                    gid = re.search(r'product-p-(\d+)', html) or re.search(r'"goods_id"\s*:\s*"?(\d+)', html)
+                    if gid:
+                        return f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
+        except Exception:
+            pass
+
+        # ثانياً: Playwright كـ fallback (أبطأ لكن أضمن)
         try:
             from playwright.async_api import async_playwright
+            proxy_server = os.getenv("IPROYAL_PROXY_SERVER", "")
+            launch_args = {"headless": True, "args": ["--no-sandbox"]}
+            if proxy_server:
+                launch_args["proxy"] = {
+                    "server": proxy_server,
+                    "username": os.getenv("IPROYAL_PROXY_USER", ""),
+                    "password": os.getenv("IPROYAL_PROXY_PASS", ""),
+                }
+
             async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=["--no-sandbox"],
-                    proxy={
-                        "server": os.getenv("IPROYAL_PROXY_SERVER", ""),
-                        "username": os.getenv("IPROYAL_PROXY_USER", ""),
-                        "password": os.getenv("IPROYAL_PROXY_PASS", ""),
-                    },
-                )
+                browser = await p.chromium.launch(**launch_args)
                 ctx = await browser.new_context(ignore_https_errors=True)
                 page = await ctx.new_page()
                 try:
@@ -616,7 +668,7 @@ async def _expand_short_url(url: str) -> str:
                 final = page.url
                 await browser.close()
                 gid = re.search(r"-p-(\d+)", final)
-                logging.info(f"Shein redirect to: {final[:100]}")
+                logging.info(f"Shein Playwright → {final[:100]}")
                 if gid:
                     return f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
         except Exception:
@@ -768,10 +820,12 @@ async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
 
     # ── الخطوة 2: IPRoyal proxy (مجاني) ──
     if not result:
+        await asyncio.sleep(2)  # تأخير بسيط بين المحاولات
         result = await _fetch_price_proxy(url, store_name)
 
     # ── الخطوة 3: Playwright (مجاني، ما عدا أمازون) ──
     if not result and "amazon." not in url:
+        await asyncio.sleep(2)
         result = await _fetch_price_playwright(url, store_name)
 
     # ── الخطوة 4: ScraperAPI مع retry (مدفوع) ──
@@ -1079,15 +1133,24 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
     try:
         async with async_playwright() as p:
             # ── إعدادات stealth ──
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
+            launch_args = {
+                "headless": True,
+                "args": [
                     "--disable-blink-features=AutomationControlled",
                     "--no-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
                 ],
-            )
+            }
+            # استخدام البروكسي إذا متوفر (يقلل احتمال الحجب)
+            proxy_server = os.getenv("IPROYAL_PROXY_SERVER", "")
+            if proxy_server:
+                launch_args["proxy"] = {
+                    "server": proxy_server,
+                    "username": os.getenv("IPROYAL_PROXY_USER", ""),
+                    "password": os.getenv("IPROYAL_PROXY_PASS", ""),
+                }
+            browser = await p.chromium.launch(**launch_args)
             ctx = await browser.new_context(
                 user_agent=(
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -1291,6 +1354,7 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
 
 async def check_prices_free(bot):
     """فحص المنتجات اللي تنجلب مجاناً — كل ساعة"""
+    import asyncio, random
     logging.info("⏰ فحص دوري — منتجات مجانية")
     conn = get_db()
     now = datetime.now().isoformat()
@@ -1320,12 +1384,16 @@ async def check_prices_free(bot):
         except Exception as e:
             logging.error(f"Check error (free): {e}")
 
+        # تأخير بين المنتجات لتجنب حجب الـ IP (5-15 ثانية عشوائي)
+        await asyncio.sleep(random.uniform(5, 15))
+
     conn.commit()
     conn.close()
     logging.info(f"✅ فحص المجانية انتهى — {checked} منتج")
 
 async def check_prices_scraperapi(bot):
     """فحص المنتجات اللي تحتاج ScraperAPI — كل يوم"""
+    import asyncio, random
     logging.info("⏰ فحص دوري — منتجات ScraperAPI")
     conn = get_db()
     now = datetime.now().isoformat()
@@ -1354,6 +1422,9 @@ async def check_prices_scraperapi(bot):
 
         except Exception as e:
             logging.error(f"Check error (scraperapi): {e}")
+
+        # تأخير بين المنتجات (10-30 ثانية — ScraperAPI أغلى)
+        await asyncio.sleep(random.uniform(10, 30))
 
     conn.commit()
     conn.close()
