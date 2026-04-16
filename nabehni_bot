@@ -578,6 +578,55 @@ async def fetch_price_noon_api(url: str) -> Optional[dict]:
 
     return None
 
+def _find_chromium_executable() -> Optional[str]:
+    """البحث عن متصفح Chromium المثبّت في مسارات مختلفة"""
+    import glob as g
+    search_paths = [
+        # مسارات Playwright الشائعة
+        *sorted(g.glob("/root/.cache/ms-playwright/chromium-*/chrome-linux/chrome"), reverse=True),
+        *sorted(g.glob("/home/*/.cache/ms-playwright/chromium-*/chrome-linux/chrome"), reverse=True),
+        *sorted(g.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"), reverse=True),
+        # مسارات النظام
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium",
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/snap/bin/chromium",
+    ]
+    for path in search_paths:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            logging.info(f"Chromium found: {path}")
+            return path
+    return None
+
+
+def _get_playwright_launch_args() -> dict:
+    """إعدادات Playwright موحّدة"""
+    launch_args = {
+        "headless": True,
+        "args": [
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--disable-blink-features=AutomationControlled",
+        ],
+    }
+    # محاولة إيجاد مسار Chromium يدوياً
+    exe = _find_chromium_executable()
+    if exe:
+        launch_args["executable_path"] = exe
+
+    # استخدام البروكسي إذا متوفر
+    proxy_server = os.getenv("IPROYAL_PROXY_SERVER", "")
+    if proxy_server and not proxy_server.startswith("ضع"):
+        launch_args["proxy"] = {
+            "server": proxy_server,
+            "username": os.getenv("IPROYAL_PROXY_USER", ""),
+            "password": os.getenv("IPROYAL_PROXY_PASS", ""),
+        }
+    return launch_args
+
+
 async def _expand_short_url(url: str) -> str:
     """تحويل الروابط القصيرة للرابط الكامل"""
     import aiohttp
@@ -610,11 +659,55 @@ async def _expand_short_url(url: str) -> str:
         needs_browser = True
 
     if needs_browser:
+        # محاولة أولى: curl (أخف من Playwright)
+        expanded = await _expand_url_with_curl(url)
+        if expanded and expanded != url:
+            logging.info(f"curl expand OK: {url[:50]} → {expanded[:80]}")
+            return expanded
+
+        # محاولة ثانية: Playwright (متصفح حقيقي)
         expanded = await _expand_with_playwright(url)
         if expanded and expanded != url:
             return expanded
 
+        logging.warning(f"فشل توسيع الرابط القصير: {url[:80]}")
+
     return url
+
+
+async def _expand_url_with_curl(url: str) -> Optional[str]:
+    """توسيع رابط قصير بـ curl — أسرع من Playwright"""
+    import asyncio
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "curl", "-sLI",
+            "--max-time", "15",
+            "--max-redirs", "10",
+            "-H", "User-Agent: Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36",
+            "-H", "Accept: text/html,application/xhtml+xml",
+            "-H", "Accept-Language: ar-SA,ar;q=0.9,en;q=0.7",
+            "-o", "/dev/null",
+            "-w", "%{url_effective}",
+            url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20)
+        final = stdout.decode().strip()
+        if final and final != url:
+            # علي إكسبرس: نبحث عن /item/
+            if "aliexpress" in url and "/item/" in final:
+                return final.split("?")[0]
+            # شي إن: نبحث عن product ID
+            if "shein" in url:
+                gid = re.search(r"-p-(\d+)", final)
+                if gid:
+                    return f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
+            if final != url:
+                return final
+    except Exception as e:
+        logging.debug(f"curl expand failed: {e}")
+    return None
 
 
 async def _expand_with_playwright(url: str) -> Optional[str]:
@@ -622,22 +715,13 @@ async def _expand_with_playwright(url: str) -> Optional[str]:
     try:
         from playwright.async_api import async_playwright
     except ImportError:
-        logging.warning("Playwright غير مثبّت — لا يمكن توسيع الروابط القصيرة")
+        logging.error("Playwright غير مثبّت — شغّل: pip install playwright && playwright install chromium")
         return None
 
     browser = None
     try:
-        proxy_server = os.getenv("IPROYAL_PROXY_SERVER", "")
-        launch_args = {
-            "headless": True,
-            "args": ["--no-sandbox", "--disable-dev-shm-usage"],
-        }
-        if proxy_server:
-            launch_args["proxy"] = {
-                "server": proxy_server,
-                "username": os.getenv("IPROYAL_PROXY_USER", ""),
-                "password": os.getenv("IPROYAL_PROXY_PASS", ""),
-            }
+        launch_args = _get_playwright_launch_args()
+        logging.info(f"Playwright expand launching... exe={launch_args.get('executable_path', 'default')}")
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(**launch_args)
@@ -664,14 +748,13 @@ async def _expand_with_playwright(url: str) -> Optional[str]:
             logging.info(f"Playwright expand: {url[:50]} → {final[:100]}")
 
             # علي إكسبرس: نبحث عن /item/XXXXX.html
-            if "aliexpress.com" in url:
+            if "aliexpress" in url.lower():
                 if "/item/" in final:
                     return final.split("?")[0]
-                # أحياناً الصفحة فيها redirect بـ JavaScript
                 return final
 
             # شي إن: نبحث عن goods ID
-            if "shein" in url:
+            if "shein" in url.lower():
                 gid = re.search(r"-p-(\d+)", final)
                 if gid:
                     return f"https://m.shein.com/ar/product-p-{gid.group(1)}.html"
@@ -680,7 +763,7 @@ async def _expand_with_playwright(url: str) -> Optional[str]:
             return final
 
     except Exception as e:
-        logging.error(f"Playwright expand error: {e}")
+        logging.error(f"Playwright expand error: {type(e).__name__}: {e}")
 
     if browser:
         try:
@@ -689,8 +772,6 @@ async def _expand_with_playwright(url: str) -> Optional[str]:
             pass
 
     return None
-
-    return url
 
 async def _fetch_price_google(url: str, store_name: str) -> Optional[dict]:
     """جلب السعر من Google Search كملاذ أخير"""
@@ -821,8 +902,13 @@ async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
     from bs4 import BeautifulSoup
 
     store_name = detect_store_name(url)
+    logging.info(f"fetch_price: original URL={url[:80]} store={store_name}")
     url = await _expand_short_url(url)
     store_name = detect_store_name(url)
+    logging.info(f"fetch_price: expanded URL={url[:80]} store={store_name}")
+
+    # متاجر تحظر aiohttp (ترجع 403) — نبدأ بـ Playwright مباشرة
+    browser_first = any(d in url.lower() for d in ("aliexpress.com", "shein.com"))
 
     # ── نون: نجرب API الداخلي أولاً (مجاني وأسرع) ──
     if "noon.com" in url.lower():
@@ -831,18 +917,33 @@ async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
             return result
         logging.info("Noon API failed, trying normal methods...")
 
+    # ── متاجر تحتاج متصفح: Playwright أولاً ──
+    if browser_first:
+        logging.info(f"Browser-first store: trying Playwright directly for {store_name}")
+        result = await _fetch_price_playwright(url, store_name)
+        if result:
+            result = await _convert_to_sar(result)
+            return result
+        logging.warning(f"Playwright failed for {store_name}, trying other methods...")
+
     # ── الخطوة 1: aiohttp مباشر (مجاني) ──
     result = await _fetch_price_aiohttp(url, store_name)
+    if result:
+        logging.info(f"aiohttp succeeded for {store_name}")
 
     # ── الخطوة 2: IPRoyal proxy (مجاني) ──
     if not result:
-        await asyncio.sleep(2)  # تأخير بسيط بين المحاولات
+        await asyncio.sleep(2)
         result = await _fetch_price_proxy(url, store_name)
+        if result:
+            logging.info(f"proxy succeeded for {store_name}")
 
-    # ── الخطوة 3: Playwright (مجاني، ما عدا أمازون) ──
-    if not result and "amazon." not in url:
+    # ── الخطوة 3: Playwright (مجاني، ما عدا أمازون ومتاجر browser_first) ──
+    if not result and "amazon." not in url and not browser_first:
         await asyncio.sleep(2)
         result = await _fetch_price_playwright(url, store_name)
+        if result:
+            logging.info(f"Playwright succeeded for {store_name}")
 
     # ── الخطوة 4: ScraperAPI مع retry (مدفوع) ──
     if not result:
@@ -850,6 +951,7 @@ async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
             result = await _fetch_price_scraperapi(url, store_name)
             if result:
                 result["_used_scraperapi"] = True
+                logging.info(f"ScraperAPI succeeded for {store_name}")
                 break
             if attempt == 0:
                 logging.info(f"ScraperAPI attempt 1 failed, retrying in 3s...")
@@ -1142,30 +1244,14 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
     try:
         from playwright.async_api import async_playwright
     except ImportError:
-        logging.warning("Playwright غير مثبّت")
+        logging.error("Playwright غير مثبّت — شغّل: pip install playwright && playwright install chromium")
         return None
 
     browser = None
     try:
         async with async_playwright() as p:
-            # ── إعدادات stealth ──
-            launch_args = {
-                "headless": True,
-                "args": [
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                ],
-            }
-            # استخدام البروكسي إذا متوفر (يقلل احتمال الحجب)
-            proxy_server = os.getenv("IPROYAL_PROXY_SERVER", "")
-            if proxy_server:
-                launch_args["proxy"] = {
-                    "server": proxy_server,
-                    "username": os.getenv("IPROYAL_PROXY_USER", ""),
-                    "password": os.getenv("IPROYAL_PROXY_PASS", ""),
-                }
+            launch_args = _get_playwright_launch_args()
+            logging.info(f"Playwright price fetch: {url[:60]} exe={launch_args.get('executable_path', 'default')}")
             browser = await p.chromium.launch(**launch_args)
             ctx = await browser.new_context(
                 user_agent=(
@@ -1176,6 +1262,7 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                 locale="ar-SA",
                 viewport={"width": 1366, "height": 768},
                 java_script_enabled=True,
+                ignore_https_errors=True,
             )
 
             # إخفاء أنه headless
@@ -1724,6 +1811,66 @@ def main():
         except Exception as e:
             await update.message.reply_text(f"❌ فشل الإرسال: {e}")
 
+    # ─── /diag (أدمن) — تشخيص المشاكل ──────────────
+    async def cmd_diag(update: Update, context):
+        """فحص إعدادات البوت والاتصال بالمتاجر"""
+        if update.effective_user.id != ADMIN_ID:
+            return
+
+        import asyncio
+        lines = ["🔧 *تشخيص نبّهني*\n"]
+
+        # 1. Playwright
+        try:
+            from playwright.async_api import async_playwright
+            lines.append("✅ مكتبة Playwright مثبّتة")
+        except ImportError:
+            lines.append("❌ مكتبة Playwright غير مثبّتة!")
+
+        exe = _find_chromium_executable()
+        if exe:
+            lines.append(f"✅ متصفح Chromium: `{exe}`")
+        else:
+            lines.append("❌ متصفح Chromium غير موجود!\nشغّل: `playwright install chromium`")
+
+        # 2. اختبار تشغيل Playwright
+        if exe:
+            try:
+                from playwright.async_api import async_playwright
+                async with async_playwright() as p:
+                    b = await p.chromium.launch(**_get_playwright_launch_args())
+                    await b.close()
+                lines.append("✅ Playwright يشتغل بنجاح")
+            except Exception as e:
+                lines.append(f"❌ Playwright ما يشتغل: `{type(e).__name__}: {e}`")
+
+        # 3. إعدادات البيئة
+        scraper = os.getenv("SCRAPER_API_KEY", "")
+        proxy = os.getenv("IPROYAL_PROXY_SERVER", "")
+        if scraper and not scraper.startswith("ضع"):
+            lines.append("✅ ScraperAPI مفعّل")
+        else:
+            lines.append("⚠️ ScraperAPI غير مفعّل")
+        if proxy and not proxy.startswith("ضع"):
+            lines.append("✅ IPRoyal proxy مفعّل")
+        else:
+            lines.append("⚠️ IPRoyal proxy غير مفعّل")
+
+        # 4. اختبار جلب سعر (إذا أرسل رابط)
+        test_url = " ".join(context.args) if context.args else ""
+        if test_url:
+            lines.append(f"\n🔍 *اختبار:* `{test_url[:60]}`")
+            try:
+                result = await fetch_price(test_url)
+                if result:
+                    lines.append(f"✅ نجح! {result.get('title', '')[:40]} — {result.get('price', '?')} {result.get('currency', '')}")
+                else:
+                    lines.append("❌ فشل جلب السعر")
+            except Exception as e:
+                lines.append(f"❌ خطأ: `{type(e).__name__}: {e}`")
+
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
     # ─── /help ────────────────────────────────────────
     async def cmd_help(update: Update, context):
         await update.message.reply_text(
@@ -2262,6 +2409,7 @@ def main():
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("users", cmd_users))
     app.add_handler(CommandHandler("reply", cmd_reply))
+    app.add_handler(CommandHandler("diag", cmd_diag))
 
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
