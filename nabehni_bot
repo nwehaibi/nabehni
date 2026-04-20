@@ -414,6 +414,7 @@ def detect_store_name(url: str) -> str:
         return "متجر"
 
 def clean_tracking_url(url: str) -> str:
+    url = url.strip().strip("<>")
     # روابط قصيرة: ما نلمسها — تتحول في _expand_short_url
     if any(d in url for d in ("a.aliexpress.com", "s.click.aliexpress.com", "amzn.eu", "amzn.to", "a.co", "sharejump", "api-shein")):
         return url
@@ -626,6 +627,9 @@ def _get_playwright_launch_args() -> dict:
             "username": os.getenv("IPROYAL_PROXY_USER", ""),
             "password": os.getenv("IPROYAL_PROXY_PASS", ""),
         }
+        logging.info(f"Playwright using proxy: {proxy_server}")
+    else:
+        logging.info("Playwright: no proxy configured")
     return launch_args
 
 
@@ -945,6 +949,9 @@ async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
     import aiohttp, asyncio
     from bs4 import BeautifulSoup
 
+    # تنظيف أقواس تيليقرام < > من الرابط
+    url = url.strip().strip("<>")
+
     original_url = url
     store_name = detect_store_name(url)
     logging.info(f"fetch_price: original URL={url[:80]} store={store_name}")
@@ -955,6 +962,11 @@ async def fetch_price(url: str, is_periodic: bool = False) -> Optional[dict]:
         url = original_url
     store_name = detect_store_name(url)
     logging.info(f"fetch_price: expanded URL={url[:80]} store={store_name}")
+
+    # علي إكسبرس: تحويل الدومينات الإقليمية للنسخة العربية
+    if "aliexpress.com" in url.lower() and "/item/" in url:
+        url = re.sub(r"https?://\w+\.aliexpress\.com/", "https://ar.aliexpress.com/", url)
+        logging.info(f"AliExpress domain normalized: {url[:80]}")
 
     # متاجر تحظر aiohttp (ترجع 403) — نبدأ بـ Playwright مباشرة
     browser_first = any(d in url.lower() for d in ("aliexpress.com", "shein.com"))
@@ -1336,23 +1348,30 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                              lambda route: route.abort())
 
             try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await page.goto(url, wait_until="load", timeout=30000)
             except Exception:
                 # بعض المتاجر ما تكمل التحميل بس المحتوى يكون موجود
                 pass
 
             # انتظار الصفحة تستقر (ضروري لشي إن وعلي إكسبرس)
             try:
-                await page.wait_for_load_state("networkidle", timeout=10000)
+                await page.wait_for_load_state("networkidle", timeout=15000)
             except Exception:
                 pass
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(5000)
 
             # إذا الصفحة حوّلت لـ captcha/challenge، ننتظر شوي ونعيد المحاولة
             current_url = page.url
             if "challenge" in current_url or "captcha" in current_url or "verify" in current_url:
                 logging.warning(f"Captcha detected: {current_url[:80]}, waiting...")
                 await page.wait_for_timeout(5000)
+
+            # تسجيل معلومات الصفحة للتشخيص
+            page_url = page.url
+            page_title = await page.title()
+            body_snippet = await page.evaluate("() => document.body ? document.body.innerText.substring(0, 300) : 'NO BODY'")
+            logging.info(f"Playwright page: url={page_url[:80]} title={page_title[:50]}")
+            logging.info(f"Playwright body preview: {body_snippet[:200]}")
 
             # ── استخراج كل شي من الصفحة بـ JavaScript واحد ──
             result = None
@@ -1363,6 +1382,7 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                     let title = '';
                     let price = 0;
                     let currency = 'SAR';
+                    let debug = [];
 
                     // === العنوان ===
                     const ogTitle = document.querySelector('meta[property="og:title"]');
@@ -1376,6 +1396,7 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                     // === السعر من JSON-LD ===
                     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
                     let bestPrice = 0;
+                    debug.push('json-ld scripts: ' + scripts.length);
 
                     for (const s of scripts) {
                         try {
@@ -1417,11 +1438,11 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                                     }
                                 }
                             }
-                        } catch(e) {}
+                        } catch(e) { debug.push('json-ld error: ' + e.message); }
                     }
 
                     if (bestPrice > 0) {
-                        return { title, price: bestPrice, currency };
+                        return { title, price: bestPrice, currency, debug: debug.join('; ') };
                     }
 
                     // === meta tags ===
@@ -1429,7 +1450,7 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                         const el = document.querySelector(`meta[property="${name}"]`);
                         if (el && el.content) {
                             const p = parseFloat(el.content.replace(/,/g, ''));
-                            if (p > 0) return { title, price: p, currency };
+                            if (p > 0) return { title, price: p, currency, debug: 'meta:' + name };
                         }
                     }
 
@@ -1437,13 +1458,47 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                     const dp = document.querySelector('[data-price]');
                     if (dp) {
                         const p = parseFloat(dp.getAttribute('data-price'));
-                        if (p > 0) return { title, price: p, currency };
+                        if (p > 0) return { title, price: p, currency, debug: 'data-price' };
                     }
 
-                    // === النص المرئي — نبحث عن سعر البيع (الأصغر) ===
+                    // === AliExpress خاص — يبحث في الصفحة عن أنماط السعر ===
+                    // البحث في كل النصوص عن أنماط أسعار معروفة
+                    const bodyText = document.body ? document.body.innerText : '';
+                    // نمط: SAR 123.45 أو 123.45 SAR أو ر.س 123
+                    const currencyPatterns = [
+                        /(?:SAR|ر\.س|SR)\s*([\d,]+\.?\d*)/gi,
+                        /([\d,]+\.?\d*)\s*(?:SAR|ر\.س|SR)/gi,
+                        /(?:EUR|€)\s*([\d,]+\.?\d*)/gi,
+                        /([\d,]+\.?\d*)\s*(?:EUR|€)/gi,
+                        /(?:USD|\$)\s*([\d,]+\.?\d*)/gi,
+                        /([\d,]+\.?\d*)\s*(?:USD|\$)/gi,
+                        /(?:AED|د\.إ)\s*([\d,]+\.?\d*)/gi,
+                        /([\d,]+\.?\d*)\s*(?:AED|د\.إ)/gi,
+                    ];
+                    const currencyNames = ['SAR','SAR','EUR','EUR','USD','USD','AED','AED'];
+
+                    for (let i = 0; i < currencyPatterns.length; i++) {
+                        const matches = [...bodyText.matchAll(currencyPatterns[i])];
+                        if (matches.length > 0) {
+                            const prices = matches.map(m => parseFloat(m[1].replace(/,/g, ''))).filter(p => p > 0 && p < 500000);
+                            if (prices.length > 0) {
+                                const minP = Math.min(...prices);
+                                return { title, price: minP, currency: currencyNames[i], debug: 'body-text-pattern' };
+                            }
+                        }
+                    }
+
+                    // === النص المرئي — CSS selectors ===
                     const priceSelectors = [
+                        // AliExpress خاص
+                        '[class*="product-price"]', '[class*="uniform-banner"]',
+                        '[class*="Price--currentPriceText"]', '[class*="es--wrap"]',
+                        '[data-spm="price"]', '.pdp-price',
+                        // شي إن خاص
+                        '[class*="ProductPrice"]', '[class*="from-price"]',
+                        // عام
                         '.sale-price', '.special-price', '.offer-price',
-                        '.current-price', '.price-now', '.pdp-price',
+                        '.current-price', '.price-now',
                         '[class*="sale"] [class*="price"]',
                         '[class*="special"] [class*="price"]',
                         '[class*="current"] [class*="price"]',
@@ -1457,30 +1512,33 @@ async def _fetch_price_playwright(url: str, store_name: str) -> Optional[dict]:
                             const els = document.querySelectorAll(sel);
                             for (const el of els) {
                                 const rect = el.getBoundingClientRect();
-                                if (rect.width === 0 || rect.height === 0) continue; // مخفي
+                                if (rect.width === 0 || rect.height === 0) continue;
 
                                 const text = el.innerText.trim();
-                                const match = text.match(/([\\d,]+\\.?\\d*)/);
+                                const match = text.match(/([\d,]+\.?\d*)/);
                                 if (match) {
                                     const num = parseFloat(match[1].replace(/,/g, ''));
                                     if (num > 0 && num < 500000) {
                                         candidates.push(num);
+                                        debug.push(sel + ':' + num);
                                     }
                                 }
                             }
                         } catch(e) {}
                     }
 
-                    // نأخذ أصغر سعر (غالباً هو سعر البيع)
                     if (candidates.length > 0) {
                         const minPrice = Math.min(...candidates);
-                        return { title, price: minPrice, currency };
+                        return { title, price: minPrice, currency, debug: debug.join('; ') };
                     }
 
-                    return null;
+                    debug.push('bodyLen:' + bodyText.length);
+                    return { title: title, price: 0, currency: currency, debug: debug.join('; ') };
                 }
             """)
-                    if result:
+                    debug_info = result.get("debug", "") if result else "null"
+                    logging.info(f"Playwright evaluate result: price={result.get('price', 0) if result else 0}, debug={debug_info}")
+                    if result and result.get("price", 0) > 0:
                         break
                 except Exception as eval_err:
                     logging.warning(f"Playwright evaluate attempt {attempt+1} failed: {eval_err}")
@@ -1933,7 +1991,7 @@ def main():
             lines.append("⚠️ IPRoyal proxy غير مفعّل")
 
         # 4. اختبار جلب سعر (إذا أرسل رابط)
-        test_url = " ".join(context.args) if context.args else ""
+        test_url = " ".join(context.args).strip("<>") if context.args else ""
         if test_url:
             lines.append(f"\n🔍 *اختبار:* `{test_url[:60]}`")
             try:
@@ -2353,7 +2411,7 @@ def main():
                 await update.message.reply_text("⚠️ أرسل رابط منتج صحيح يبدأ بـ https://")
                 return
 
-            check_url = check_url.group()
+            check_url = check_url.group().strip("<>")
             check_url = clean_tracking_url(check_url)
             store_name = detect_store_name(check_url)
             await update.message.reply_text(f"🔍 جاري التحقق من {store_name}...")
@@ -2390,7 +2448,7 @@ def main():
         # ── رابط منتج ──
         url_match = re.search(r"https?://\S+", text)
         if url_match:
-            url = url_match.group()
+            url = url_match.group().strip("<>")
 
             # تنظيف الرابط من tracking parameters
             url = clean_tracking_url(url)
